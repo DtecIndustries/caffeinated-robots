@@ -2,6 +2,7 @@ import cv2
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from camera.capture import Camera
+from config import STREAM_WIDTH, STREAM_HEIGHT
 
 router = APIRouter()
 _camera: Camera | None = None
@@ -17,6 +18,9 @@ def _generate():
         frame = _camera.read()
         if frame is None:
             continue
+        h, w = frame.shape[:2]
+        scale = min(STREAM_WIDTH / w, STREAM_HEIGHT / h)
+        frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
         _, buf = cv2.imencode(".jpg", frame)
         yield (
             b"--frame\r\n"
