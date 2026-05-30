@@ -39,7 +39,7 @@ scoped agent API key (`production-line-supervisor`, assigned the `postgres` and
 
 | Who | Does |
 |---|---|
-| Vision/QC | `INSERT INTO faulty_parts (station_pos, fault, confidence, image_url)` → `status='open'`, `resolution=NULL` |
+| Vision/QC | `INSERT INTO faulty_parts (station_pos, fault, confidence, image_b64)` → `status='open'`, `resolution=NULL` |
 | **monitor.py** | polls `status='open'` → posts ticket to Discord → `status='ticketed'` + `discord_message_id` |
 | **supervisor_agent.py** (Claude in Discord) | supervisor says go / no-go → sets `resolution`, `resolution_note`, `resolved_by`, `resolved_at` → `status='resolved'` |
 | **Robot code** (yours) | polls `resolution IS NOT NULL AND robot_acked=false` → acts → `SET robot_acked=true` |
@@ -47,9 +47,10 @@ scoped agent API key (`production-line-supervisor`, assigned the `postgres` and
 `resolution` is **`go`** (part is fine — let it continue) or **`no_go`** (pull it off the
 line for rework / repack / scrap — detail in `resolution_note`).
 
-`image_url` holds **base64** (a camera frame). Discord can't render base64 in an
-embed, so the ticket shows the text fields only; if `image_url` ever contains a
-real `http(s)` URL, the monitor adds it as the embed image automatically.
+`image_b64` holds the fault photo as **base64** (a camera frame). The monitor
+decodes it and uploads it to Discord as a file attachment, so it renders inline
+on the ticket (needs `DISCORD_BOT_TOKEN` — multipart can't go through the straw).
+If `image_b64` instead holds an `http(s)` URL, that URL is used as the embed image.
 
 ## Setup
 

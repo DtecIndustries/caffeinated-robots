@@ -14,6 +14,9 @@ DB_NAME = os.getenv("DB_NAME", "caffeinated")
 # --- Discord ---
 DISCORD_CHANNEL_ID = os.environ["DISCORD_CHANNEL_ID"]
 DISCORD_BOT_USER_ID = os.getenv("DISCORD_BOT_USER_ID", "")
+# Only needed to upload fault photos as Discord attachments (multipart can't go
+# through the Soda Straw http_request tool). Leave empty to post tickets without photos.
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 
 # --- Anthropic (supervisor assistant) ---
 # ANTHROPIC_API_KEY is read from the environment by the SDK directly.

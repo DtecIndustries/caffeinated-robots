@@ -21,7 +21,7 @@ SAMPLE_IMAGE_B64 = (
 
 async def main():
     rows = await straw.sql(
-        "INSERT INTO faulty_parts (station_pos, fault, confidence, image_url) "
+        "INSERT INTO faulty_parts (station_pos, fault, confidence, image_b64) "
         "VALUES (:pos, :fault, :conf, :img) RETURNING id",
         intent="Create a demo faulty part to trigger a Discord ticket",
         params={"pos": 3, "fault": "bad paint", "conf": 0.92, "img": SAMPLE_IMAGE_B64},

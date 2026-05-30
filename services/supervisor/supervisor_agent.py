@@ -21,7 +21,7 @@ operating inside a Discord channel. Each ticket is a faulty part the QC/vision p
 the line. The supervisor decides GO or NO-GO, and the robot reads that decision and acts.
 
 Table `faulty_parts` (database caffeinated, public schema):
-- id, detected_at, station_pos, fault (text, e.g. "bad paint"), confidence, image_url
+- id, detected_at, station_pos, fault (text, e.g. "bad paint"), confidence, image_b64
 - status: open -> ticketed -> resolved
 - resolution (NULL until you set it): 'go' or 'no_go'
 - resolution_note, resolved_by, resolved_at, robot_acked (the robot sets this true once it acts)
