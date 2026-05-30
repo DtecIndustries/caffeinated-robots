@@ -25,7 +25,7 @@ STATION_IDS = [s.id for s in STATIONS]
 STATION_BY_ID: dict[int, Station] = {s.id: s for s in STATIONS}
 
 
-def crop_roi(frame, station_id: int, padding: float = 0.1):
+def crop_roi(frame, station_id: int, padding: float = 0.2):
     """Crop a frame to a station's ROI with optional padding on all sides (normalized)."""
     s = STATION_BY_ID.get(station_id)
     if s is None:
