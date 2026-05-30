@@ -22,5 +22,8 @@ services/vision/detection/models/*
 # Reports (Notion integration — optional)
 reports/
 
+# Camera check snapshots
+services/vision/.cam_check/
+
 # OS
 .DS_Store

@@ -1,12 +1,12 @@
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from config import CAMERA_INDEX, STREAM_HOST, STREAM_PORT
+from config import CAMERA_INDEX, CAMERA_URL, STREAM_HOST, STREAM_PORT
 from camera.capture import Camera
 from camera.stream import router as stream_router, set_camera
 
 
-cam = Camera(CAMERA_INDEX)
+cam = Camera(CAMERA_URL if CAMERA_URL else CAMERA_INDEX)
 
 
 @asynccontextmanager

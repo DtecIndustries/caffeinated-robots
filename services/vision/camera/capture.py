@@ -3,10 +3,10 @@ import threading
 
 
 class Camera:
-    def __init__(self, index: int):
-        self._cap = cv2.VideoCapture(index)
+    def __init__(self, source: int | str):
+        self._cap = cv2.VideoCapture(source)
         if not self._cap.isOpened():
-            raise RuntimeError(f"Cannot open camera {index}")
+            raise RuntimeError(f"Cannot open camera source: {source}")
         self._frame = None
         self._lock = threading.Lock()
         self._running = False
