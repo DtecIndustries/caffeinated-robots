@@ -13,6 +13,12 @@ cp .env.example .env   # fill in ROBOT_PORT, DB_URL
 uv run main.py
 ```
 
+**autonomous robot runner**
+```bash
+cd services/vision
+uv run runner.py           # polls DB, dispatches 3_5 / 5_4 / 5_R automatically
+```
+
 **digital twin**
 ```bash
 cd services/twin
