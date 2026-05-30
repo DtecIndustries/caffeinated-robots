@@ -20,7 +20,9 @@ from camera.capture import Camera
 from camera.stream import router as stream_router, set_camera
 from detection.detector import BoxDetector
 from detection.station import STATION_IDS
-from db.sodastraw_client import StationWriter
+import db.sqlite_client as local_db
+from db.upstream_sync import sync_loop, notify_change
+from db.rules import apply_rules
 
 cam = Camera(CAMERA_URL if CAMERA_URL else CAMERA_INDEX)
 detector = BoxDetector(
@@ -28,7 +30,6 @@ detector = BoxDetector(
     bright_thresh=DETECTION_BRIGHT_THRESH,
     range_thresh=DETECTION_RANGE_THRESH,
 )
-writer = StationWriter()
 
 station_states:   dict[int, bool] = {sid: False for sid in STATION_IDS}
 station_statuses: dict[int, str]  = {sid: ""    for sid in STATION_IDS}
@@ -84,8 +85,9 @@ async def detection_loop():
             station_colors.update(raw)
 
             changed = (confirmed != prev_written) or (statuses != prev_written_statuses)
-            if DB_URL and changed and (now - last_write) >= DB_DEBOUNCE_S:
-                await writer.write(confirmed, statuses)
+            if changed and (now - last_write) >= DB_DEBOUNCE_S:
+                await asyncio.to_thread(local_db.write_vision, confirmed, statuses)
+                notify_change()
                 prev_written          = confirmed.copy()
                 prev_written_statuses = statuses.copy()
                 last_write = now
@@ -96,12 +98,11 @@ async def detection_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cam.start()
-    if DB_URL:
-        await writer.connect()
+    local_db.ensure_tables()
     asyncio.create_task(detection_loop())
+    asyncio.create_task(sync_loop())
     yield
     cam.stop()
-    await writer.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -203,7 +204,12 @@ def _debug_frames():
         frame = cam.read()
         if frame is None:
             continue
-        annotated = detector.annotated(frame, station_colors)
+        vision_dict = {
+            **{f"pos{sid}_item_present": station_colors[sid] is not None for sid in STATION_IDS},
+            **{f"pos{sid}_item_status":  station_statuses[sid] for sid in STATION_IDS},
+        }
+        calculated = apply_rules(vision_dict, robot_display)
+        annotated  = detector.annotated(frame, station_colors, calculated)
         h, w = annotated.shape[:2]
         scale = min(STREAM_WIDTH / w, STREAM_HEIGHT / h)
         annotated = cv2.resize(annotated, (int(w * scale), int(h * scale)))
