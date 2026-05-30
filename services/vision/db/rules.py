@@ -41,4 +41,7 @@ def apply_rules(vision: dict, robot: dict) -> dict:
         if holding:
             _force(result, 5, False)
 
+    # Items at pos 5 were accepted — never show as defect
+    result["pos5_item_status"] = ""
+
     return result
