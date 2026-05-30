@@ -12,6 +12,7 @@ from config import (
     STREAM_WIDTH, STREAM_HEIGHT,
     DETECTION_INTERVAL, DETECTION_RATIO_THRESHOLD,
     DETECTION_BRIGHT_THRESH, DETECTION_DARK_THRESH,
+    DETECTION_CONFIRM_DELAY,
     DB_URL,
 )
 from camera.capture import Camera
@@ -34,18 +35,34 @@ station_states: dict[int, bool] = {1: False, 2: False, 3: False, 4: False}
 DB_DEBOUNCE_S = 1.0
 
 async def detection_loop():
+    # first_seen[id] = monotonic timestamp when continuous detection started, or None
+    first_seen: dict[int, float | None] = {i: None for i in range(1, 5)}
     prev_written: dict[int, bool] = {}
     last_write = 0.0
+
     while True:
         frame = cam.read()
         if frame is not None:
-            states = detector.detect(frame)
-            station_states.update(states)
+            raw = detector.detect(frame)
             now = time.monotonic()
-            if DB_URL and states != prev_written and (now - last_write) >= DB_DEBOUNCE_S:
-                await writer.write(states)
-                prev_written = states.copy()
+
+            confirmed: dict[int, bool] = {}
+            for sid, detected in raw.items():
+                if detected:
+                    if first_seen[sid] is None:
+                        first_seen[sid] = now
+                    confirmed[sid] = (now - first_seen[sid]) >= DETECTION_CONFIRM_DELAY
+                else:
+                    first_seen[sid] = None
+                    confirmed[sid] = False
+
+            station_states.update(confirmed)
+
+            if DB_URL and confirmed != prev_written and (now - last_write) >= DB_DEBOUNCE_S:
+                await writer.write(confirmed)
+                prev_written = confirmed.copy()
                 last_write = now
+
         await asyncio.sleep(DETECTION_INTERVAL)
 
 

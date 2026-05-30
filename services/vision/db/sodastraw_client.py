@@ -15,7 +15,6 @@ class StationWriter:
             await cur.execute("""
                 CREATE TABLE IF NOT EXISTS production_line (
                     id               SERIAL PRIMARY KEY,
-                    ts               TIMESTAMPTZ DEFAULT NOW(),
                     pos1_item_present BOOLEAN NOT NULL,
                     pos1_item_status  VARCHAR(128) NOT NULL DEFAULT '',
                     pos2_item_present BOOLEAN NOT NULL,
@@ -32,12 +31,21 @@ class StationWriter:
         s = statuses or {}
         async with self._conn.cursor() as cur:
             await cur.execute(
-                """INSERT INTO production_line (
+                """INSERT INTO production_line (id,
                     pos1_item_present, pos1_item_status,
                     pos2_item_present, pos2_item_status,
                     pos3_item_present, pos3_item_status,
                     pos4_item_present, pos4_item_status
-                ) VALUES (%s,%s, %s,%s, %s,%s, %s,%s)""",
+                ) VALUES (1, %s,%s, %s,%s, %s,%s, %s,%s)
+                ON CONFLICT (id) DO UPDATE SET
+                    pos1_item_present = EXCLUDED.pos1_item_present,
+                    pos1_item_status  = EXCLUDED.pos1_item_status,
+                    pos2_item_present = EXCLUDED.pos2_item_present,
+                    pos2_item_status  = EXCLUDED.pos2_item_status,
+                    pos3_item_present = EXCLUDED.pos3_item_present,
+                    pos3_item_status  = EXCLUDED.pos3_item_status,
+                    pos4_item_present = EXCLUDED.pos4_item_present,
+                    pos4_item_status  = EXCLUDED.pos4_item_status""",
                 (
                     states[1], s.get(1, ""),
                     states[2], s.get(2, ""),
