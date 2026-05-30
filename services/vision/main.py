@@ -51,7 +51,8 @@ DB_DEBOUNCE_S = 1.0
 
 async def detection_loop():
     first_seen: dict[int, float | None] = {sid: None for sid in STATION_IDS}
-    prev_written: dict[int, bool] = {}
+    prev_written:          dict[int, bool] = {}
+    prev_written_statuses: dict[int, str]  = {}
     last_write = 0.0
 
     while True:
@@ -82,9 +83,11 @@ async def detection_loop():
             station_statuses.update(statuses)
             station_colors.update(raw)
 
-            if DB_URL and confirmed != prev_written and (now - last_write) >= DB_DEBOUNCE_S:
+            changed = (confirmed != prev_written) or (statuses != prev_written_statuses)
+            if DB_URL and changed and (now - last_write) >= DB_DEBOUNCE_S:
                 await writer.write(confirmed, statuses)
-                prev_written = confirmed.copy()
+                prev_written          = confirmed.copy()
+                prev_written_statuses = statuses.copy()
                 last_write = now
 
         await asyncio.sleep(DETECTION_INTERVAL)

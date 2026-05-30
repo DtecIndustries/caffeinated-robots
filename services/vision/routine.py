@@ -69,7 +69,7 @@ POSES = [
     {
         "name":      "above|part_false|gripper_closed",
         "positions": [2060, 1955, 1907, 2865, 2069, 1825],
-        "pause":     4.0,
+        "pause":     2.0,
         "station":   0,
         "forces":    {3: True, 4: True},
     },
