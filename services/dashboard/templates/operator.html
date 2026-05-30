@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Repair Station</title>
+<style>
+  :root {
+    --bg: #0a0e13; --panel: #141d27; --panel2: #1c2733; --line: #2a3845;
+    --ink: #f1f6fb; --muted: #93a7b8; --ok: #34d399;
+    --major: #fb5b73; --minor: #fbbf24; --accent: #38bdf8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background: var(--bg); color: var(--ink); }
+  .bar { display: flex; align-items: center; justify-content: space-between;
+         padding: 14px 24px; border-bottom: 1px solid var(--line); background: #0d141b; }
+  .bar .who { font-weight: 700; letter-spacing: .3px; }
+  .bar .who small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  .bar a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .alarmbanner { background: linear-gradient(90deg, #3a0f1a, #2a0c14); border-bottom: 1px solid #4a1422;
+                 color: var(--major); font-weight: 700; padding: 10px 24px; letter-spacing: .4px; }
+  .alarmbanner.minor { background: linear-gradient(90deg, #3a2c0c, #2a200a); color: var(--minor); border-color:#4a3914; }
+  .grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; padding: 22px 24px; max-width: 1180px; margin: 0 auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; }
+  .panel h2 { margin: 0 0 14px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .part-name { font-size: 30px; font-weight: 800; margin: 0; }
+  .sku { color: var(--muted); margin: 4px 0 14px; font-variant-numeric: tabular-nums; }
+  .sev-badge { display: inline-block; font-size: 12px; font-weight: 800; text-transform: uppercase;
+               letter-spacing: .6px; padding: 5px 12px; border-radius: 8px; vertical-align: middle; margin-left: 10px; }
+  .sev-badge.major { background: #45131f; color: var(--major); }
+  .sev-badge.minor { background: #43350f; color: var(--minor); }
+  .defect-line { font-size: 19px; font-weight: 600; margin: 6px 0; }
+  .reason { color: var(--muted); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin-top: 14px; font-size: 14.5px; }
+  .kv .k { color: var(--muted); }
+  img.qc { width: 100%; border-radius: 12px; margin-top: 14px; border: 1px solid var(--line); }
+  .capture { margin-top: 14px; }
+  .capture .caption { font-size: 12.5px; color: var(--accent); letter-spacing: .3px; }
+  .capture img.qc { margin-top: 6px; }
+  /* line strip */
+  .line-strip { display: flex; align-items: stretch; gap: 8px; margin-top: 6px; }
+  .stn { flex: 1; text-align: center; background: var(--panel2); border: 1px solid var(--line);
+         border-radius: 10px; padding: 12px 6px; position: relative; }
+  .stn .pos { color: var(--muted); font-size: 11px; }
+  .stn .nm { font-weight: 600; font-size: 14px; margin-top: 3px; }
+  .stn.here { background: #2a1620; border-color: var(--major); box-shadow: 0 0 0 2px rgba(251,91,115,.25); }
+  .stn.here .nm { color: var(--major); }
+  .stn .pin { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); font-size: 18px; }
+  .arrowsm { align-self: center; color: var(--muted); }
+  /* steps */
+  ol.steps { margin: 0; padding-left: 0; list-style: none; counter-reset: step; }
+  ol.steps li { counter-increment: step; padding: 12px 12px 12px 48px; position: relative;
+                border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--panel2);
+                cursor: pointer; transition: opacity .15s; }
+  ol.steps li::before { content: counter(step); position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+                        width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #04222e;
+                        font-weight: 800; font-size: 13px; display: grid; place-items: center; }
+  ol.steps li.done { opacity: .5; text-decoration: line-through; }
+  ol.steps li.done::before { background: var(--ok); }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 16px; }
+  .tool { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; font-size: 14px; }
+  .disp { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: #0e1620; border: 1px solid var(--line); }
+  .disp b { color: var(--accent); }
+  .others { padding: 0 24px 28px; max-width: 1180px; margin: 0 auto; }
+  .others h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { text-decoration: none; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+          border-radius: 999px; padding: 7px 14px; font-size: 13.5px; }
+  .chip.active { border-color: var(--accent); color: var(--accent); }
+  .cleared { text-align: center; padding: 80px 24px; }
+  .cleared .big { font-size: 40px; font-weight: 800; color: var(--ok); }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div class="who">🔧 Repair Station <small id="stationhint"></small></div>
+    <a href="/">← Overview</a>
+  </div>
+  <div id="banner" class="alarmbanner" hidden></div>
+  <div id="root"></div>
+
+<script>
+const POLL_MS = {{ poll_ms }};
+const FIXED_ID = {{ product_id if product_id is not none else "null" }};
+const doneSteps = new Set();      // step indices marked done by the operator
+let currentId = FIXED_ID;
+
+async function getJSON(url) {
+  const r = await fetch(url);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+
+function sevClass(s) { return (s || "").toLowerCase() === "major" ? "major" : "minor"; }
+function fmtTime(iso) { return iso ? new Date(iso).toLocaleTimeString() : "—"; }
+
+async function load() {
+  try {
+    const list = await getJSON("/api/defects");
+    // Pick the part: the one in the URL, else the most urgent open defect.
+    if (currentId == null || !list.defects.some(d => d.product_id === currentId)) {
+      if (!FIXED_ID && list.defects.length) currentId = list.defects[0].product_id;
+    }
+    if (currentId == null || !list.defects.some(d => d.product_id === currentId)) {
+      // Selected part is no longer faulty (repaired/cleared) or nothing open.
+      renderCleared(list);
+      return;
+    }
+    const d = await getJSON("/api/defects/" + currentId);
+    render(d, list);
+  } catch (e) {
+    document.getElementById("root").innerHTML =
+      `<div class="cleared"><div class="big" style="color:var(--major)">Connection error</div>
+       <p class="muted">${e.message}</p></div>`;
+  }
+}
+
+function renderCleared(list) {
+  document.getElementById("banner").hidden = true;
+  const others = list.defects.length
+    ? `<p class="muted">${list.defects.length} other part(s) still need attention.</p>` + chips(list, null)
+    : `<p class="muted">No faulty parts on the line. ✅</p>`;
+  document.getElementById("root").innerHTML =
+    `<div class="cleared"><div class="big">✓ Part cleared</div>
+     <p class="muted">This part is no longer flagged as faulty.</p>${others}</div>`;
+}
+
+function chips(list, activeId) {
+  if (!list.defects.length) return "";
+  return `<div class="others"><h2>Open defects</h2><div class="chips">` +
+    list.defects.map(d =>
+      `<a class="chip ${d.product_id === activeId ? "active" : ""}" href="/operator?product_id=${d.product_id}">
+        ${d.label || "#" + d.product_id} · ${(d.severity || d.product_status)}
+       </a>`).join("") +
+    `</div></div>`;
+}
+
+function render(d, list) {
+  const sc = sevClass(d.severity);
+  document.getElementById("stationhint").textContent =
+    d.station_name ? "· at " + d.station_name + " (pos " + d.station_position + ")" : "";
+
+  const banner = document.getElementById("banner");
+  banner.hidden = false;
+  banner.className = "alarmbanner " + sc;
+  banner.textContent = (sc === "major" ? "⛔ " : "⚠️ ") +
+    "DEFECT — " + (d.label || "Part #" + d.product_id) + " — " + d.defect +
+    "  ·  station: " + (d.station_name || "?");
+
+  const line = (d.line || []).map((s, i) => {
+    const sep = i ? `<div class="arrowsm">→</div>` : "";
+    return sep + `<div class="stn ${s.is_here ? "here" : ""}">
+        ${s.is_here ? '<div class="pin">📍</div>' : ""}
+        <div class="pos">POS ${s.position}</div>
+        <div class="nm">${s.name}</div>
+      </div>`;
+  }).join("");
+
+  const r = d.repair || {};
+  const steps = (r.steps || []).map((s, i) =>
+    `<li data-i="${i}" class="${doneSteps.has(i) ? "done" : ""}">${s}</li>`).join("");
+  const tools = (r.tools || []).map(t => `<span class="tool">${t}</span>`).join("");
+
+  document.getElementById("root").innerHTML = `
+    <div class="grid">
+      <div class="panel">
+        <h2>What is defective</h2>
+        <p class="part-name">${d.label || "Part #" + d.product_id}
+          <span class="sev-badge ${sc}">${d.severity || d.product_status}</span></p>
+        <div class="sku">${d.sku ? "SKU " + d.sku : ""}${d.batch ? " · batch " + d.batch : ""} · product #${d.product_id}</div>
+        <div class="defect-line">${d.defect}</div>
+        ${d.reason ? `<div class="reason">${d.reason}</div>` : ""}
+        <div class="kv">
+          <span class="k">Status</span><span>${d.product_status}</span>
+          <span class="k">Detection</span><span>${d.has_failed_detection
+              ? "failed QC" + (d.confidence != null ? " · conf " + (d.confidence*100).toFixed(0) + "%" : "")
+              : "flagged by status"}</span>
+          <span class="k">Flagged at</span><span>${fmtTime(d.detected_at)}</span>
+        </div>
+        ${d.has_capture ? `
+          <div class="capture">
+            <div class="caption">📷 Camera capture at defect${d.captured_at ? " · " + fmtTime(d.captured_at) : ""}</div>
+            <img class="qc" src="${d.capture_url}" alt="Camera capture at time of defect" />
+          </div>` : ""}
+
+        <h2 style="margin-top:22px">Where on the line</h2>
+        <div class="line-strip">${line}</div>
+      </div>
+
+      <div class="panel">
+        <h2>Repair instructions</h2>
+        <div class="reason" style="margin-bottom:12px">${r.summary || ""}</div>
+        ${tools ? `<div class="tools">${tools}</div>` : ""}
+        <ol class="steps">${steps}</ol>
+        <div class="disp">
+          <div><b>Disposition:</b> ${r.disposition || "Manual review"}</div>
+          ${r.est_minutes ? `<div class="muted">Est. time: ~${r.est_minutes} min · tap a step to check it off</div>` : ""}
+        </div>
+      </div>
+    </div>
+    ${chips(list, d.product_id)}
+  `;
+
+  document.querySelectorAll("ol.steps li").forEach(li => {
+    li.addEventListener("click", () => {
+      const i = +li.dataset.i;
+      if (doneSteps.has(i)) { doneSteps.delete(i); li.classList.remove("done"); }
+      else { doneSteps.add(i); li.classList.add("done"); }
+    });
+  });
+}
+
+load();
+setInterval(load, POLL_MS);
+</script>
+</body>
+</html>

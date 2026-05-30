@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import time
 import cv2
 import uvicorn
@@ -19,16 +20,19 @@ from config import (
 from camera.capture import Camera
 from camera.stream import router as stream_router, set_camera
 from detection.detector import BoxDetector
-from detection.station import STATION_IDS
+from detection.station import STATION_IDS, crop_roi
 from db.sodastraw_client import StationWriter
+import db.sqlite_client as local_db
+from db.upstream_sync import sync_loop, notify_change
+from db.rules import apply_rules
 
-cam = Camera(CAMERA_URL if CAMERA_URL else CAMERA_INDEX)
+cam    = Camera(CAMERA_URL if CAMERA_URL else CAMERA_INDEX)
+writer = StationWriter()
 detector = BoxDetector(
     ratio_threshold=DETECTION_RATIO_THRESHOLD,
     bright_thresh=DETECTION_BRIGHT_THRESH,
     range_thresh=DETECTION_RANGE_THRESH,
 )
-writer = StationWriter()
 
 station_states:   dict[int, bool] = {sid: False for sid in STATION_IDS}
 station_statuses: dict[int, str]  = {sid: ""    for sid in STATION_IDS}
@@ -49,9 +53,26 @@ robot_display = {
 DB_DEBOUNCE_S = 1.0
 
 
+def _fault_label(status: str) -> str:
+    """Turn an internal status tag (e.g. 'FAULTY:SURFACE_DAMAGE') into a fault name."""
+    if ":" in status:
+        return status.split(":", 1)[1].replace("_", " ").lower()
+    return "surface damage"
+
+
+def _encode_jpeg_b64(frame) -> str | None:
+    """JPEG-encode a frame and base64 it for the faulty_parts.image_b64 column."""
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        return None
+    return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
 async def detection_loop():
     first_seen: dict[int, float | None] = {sid: None for sid in STATION_IDS}
-    prev_written: dict[int, bool] = {}
+    prev_written:          dict[int, bool] = {}
+    prev_written_statuses: dict[int, str]  = {}
+    prev_faulty:           dict[int, bool] = {sid: False for sid in STATION_IDS}
     last_write = 0.0
 
     while True:
@@ -82,10 +103,32 @@ async def detection_loop():
             station_statuses.update(statuses)
             station_colors.update(raw)
 
-            if DB_URL and confirmed != prev_written and (now - last_write) >= DB_DEBOUNCE_S:
-                await writer.write(confirmed, statuses)
-                prev_written = confirmed.copy()
+            changed = (confirmed != prev_written) or (statuses != prev_written_statuses)
+            if changed and (now - last_write) >= DB_DEBOUNCE_S:
+                await asyncio.to_thread(local_db.write_vision, confirmed, statuses)
+                notify_change()
+                prev_written          = confirmed.copy()
+                prev_written_statuses = statuses.copy()
                 last_write = now
+
+            # Snapshot the camera frame the moment a station toggles into a fault
+            # (rising edge only — one ticket per defect, not per detection tick).
+            if DB_URL:
+                for sid in STATION_IDS:
+                    is_faulty = bool(statuses.get(sid))
+                    if is_faulty and not prev_faulty[sid]:
+                        # Capture only the faulty station's ROI — the exact stage
+                        # the part was flagged at.
+                        image_b64 = _encode_jpeg_b64(crop_roi(frame, sid))
+                        try:
+                            await writer.record_fault(
+                                station_pos=sid,
+                                fault=_fault_label(statuses[sid]),
+                                image_b64=image_b64,
+                            )
+                        except Exception as e:
+                            print(f"  [db] record_fault failed: {e}")
+                    prev_faulty[sid] = is_faulty
 
         await asyncio.sleep(DETECTION_INTERVAL)
 
@@ -93,9 +136,11 @@ async def detection_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cam.start()
+    local_db.ensure_tables()
     if DB_URL:
         await writer.connect()
     asyncio.create_task(detection_loop())
+    asyncio.create_task(sync_loop())
     yield
     cam.stop()
     await writer.close()
@@ -200,7 +245,19 @@ def _debug_frames():
         frame = cam.read()
         if frame is None:
             continue
-        annotated = detector.annotated(frame, station_colors)
+        vision_dict = {
+            **{
+                f"pos{sid}_item_present": (
+                    forced_states[sid]              # forced value takes priority
+                    if forced_states[sid] is not None
+                    else station_colors[sid] is not None  # otherwise raw CV
+                )
+                for sid in STATION_IDS
+            },
+            **{f"pos{sid}_item_status": station_statuses[sid] for sid in STATION_IDS},
+        }
+        calculated = apply_rules(vision_dict, robot_display)
+        annotated  = detector.annotated(frame, station_colors, calculated)
         h, w = annotated.shape[:2]
         scale = min(STREAM_WIDTH / w, STREAM_HEIGHT / h)
         annotated = cv2.resize(annotated, (int(w * scale), int(h * scale)))

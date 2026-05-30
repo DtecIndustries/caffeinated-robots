@@ -22,3 +22,20 @@ STATIONS: list[Station] = [
 ]
 
 STATION_IDS = [s.id for s in STATIONS]
+STATION_BY_ID: dict[int, Station] = {s.id: s for s in STATIONS}
+
+
+def crop_roi(frame, station_id: int, padding: float = 0.2):
+    """Crop a frame to a station's ROI with optional padding on all sides (normalized)."""
+    s = STATION_BY_ID.get(station_id)
+    if s is None:
+        return frame
+    h, w = frame.shape[:2]
+    pw = (s.x2 - s.x1) * padding
+    ph = (s.y2 - s.y1) * padding
+    x1 = max(0, int((s.x1 - pw) * w))
+    y1 = max(0, int((s.y1 - ph) * h))
+    x2 = min(w, int((s.x2 + pw) * w))
+    y2 = min(h, int((s.y2 + ph) * h))
+    crop = frame[y1:y2, x1:x2]
+    return crop if crop.size else frame

@@ -62,7 +62,7 @@ class StationWriter:
                     station_pos        INTEGER,
                     fault              TEXT NOT NULL,
                     confidence         REAL,
-                    image_base64       TEXT,
+                    image_b64          TEXT,
                     status             TEXT NOT NULL DEFAULT 'open',
                     discord_message_id TEXT,
 
@@ -74,7 +74,30 @@ class StationWriter:
                     robot_acked        BOOLEAN NOT NULL DEFAULT FALSE
                 )
             """)
+            # image_b64 holds a base64-encoded JPEG of the camera frame at detect time.
+            await cur.execute(
+                "ALTER TABLE faulty_parts ADD COLUMN IF NOT EXISTS image_b64 TEXT"
+            )
         await self._conn.commit()
+
+    async def record_fault(
+        self,
+        station_pos: int,
+        fault: str,
+        image_b64: str | None,
+        confidence: float | None = None,
+    ) -> int:
+        """Insert one open faulty-part ticket with the captured frame. Returns its id."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO faulty_parts (station_pos, fault, confidence, image_b64, status)
+                   VALUES (%s, %s, %s, %s, 'open')
+                   RETURNING id""",
+                (station_pos, fault, confidence, image_b64),
+            )
+            row = await cur.fetchone()
+        await self._conn.commit()
+        return row[0]
 
     async def write(self, states: dict[int, bool], statuses: dict[int, str] | None = None):
         """Update only station detection columns. Never touches robot_* fields."""

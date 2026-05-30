@@ -1,6 +1,7 @@
 import os
 import psycopg
 from dotenv import load_dotenv
+from db.sqlite_client import write_robot
 
 load_dotenv()
 
@@ -13,6 +14,13 @@ def update_robot_state(
     joints: list[int],
     pose: str,
 ):
+    # Always write to local SQLite
+    try:
+        write_robot(curr_pos=curr_pos, next_pos=next_pos, joints=joints, pose=pose)
+    except Exception as e:
+        print(f"  [local] {e}")
+
+    # Write to PostgreSQL if configured
     if not _DB_URL:
         return
     try:
