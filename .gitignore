@@ -23,6 +23,9 @@ services/vision/detection/models/*
 # Reports (Notion integration — optional)
 reports/
 
+# Local SQLite buffer
+services/vision/local.db
+
 # Camera check snapshots
 services/vision/.cam_check/
 

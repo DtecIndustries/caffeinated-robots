@@ -43,16 +43,30 @@ class BoxDetector:
 
         return results
 
-    def annotated(self, frame: np.ndarray, results: dict[int, DetectionResult]) -> np.ndarray:
+    def annotated(
+        self,
+        frame: np.ndarray,
+        results: dict[int, DetectionResult],
+        calculated: dict | None = None,
+    ) -> np.ndarray:
         out = frame.copy()
         h, w = out.shape[:2]
         COLOR = {"white": (0, 255, 0), "black": (0, 100, 255), None: (0, 0, 255)}
         LABEL = {"white": "GOOD",      "black": "FAULTY",       None: "EMPTY"}
+        calc = calculated or {}
+
         for s in STATIONS:
             x1, y1 = int(s.x1 * w), int(s.y1 * h)
             x2, y2 = int(s.x2 * w), int(s.y2 * h)
-            res = results.get(s.id)
-            cv2.rectangle(out, (x1, y1), (x2 - 1, y2 - 1), COLOR[res], 2)
-            cv2.putText(out, f"P{s.id}: {LABEL[res]}",
-                        (x1 + 6, y1 + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR[res], 2)
+            res   = results.get(s.id)
+            color = COLOR[res]
+
+            present    = bool(calc.get(f"pos{s.id}_item_present"))
+            calc_str   = "TRUE" if present else "FALSE"
+            label      = f"P{s.id}: {LABEL[res]} | {calc_str}"
+
+            cv2.rectangle(out, (x1, y1), (x2 - 1, y2 - 1), color, 2)
+            cv2.putText(out, label,
+                        (x1 + 6, y1 + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
         return out
