@@ -27,6 +27,7 @@ duration = float(sys.argv[3]) if len(sys.argv) > 3 else 2.0
 port     = os.getenv("ROBOT_PORT", "/dev/ttyUSB0")
 
 from robot.servo_client import ServoClient
+from db.robot_writer import update_robot_state
 
 client = ServoClient(port=port, servo_ids=[servo_id])
 try:
@@ -64,10 +65,11 @@ try:
         print("\nCancelled — nothing sent.")
         sys.exit(0)
 
+    update_robot_state(curr_pos=[current], next_pos=[target], pose="move_test")
     client.set_position_slow(servo_id, target, duration=duration)
 
-
     confirmed = client.read_position(servo_id)
+    update_robot_state(curr_pos=[confirmed], next_pos=[], pose="move_test")
     print(f"Position now: {confirmed} ticks")
 
 except Exception as e:

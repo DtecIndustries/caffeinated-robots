@@ -24,18 +24,36 @@ class StationWriter:
                     pos4_item_present BOOLEAN NOT NULL,
                     pos4_item_status  VARCHAR(128) NOT NULL DEFAULT '',
                     pos5_item_present BOOLEAN NOT NULL DEFAULT false,
-                    pos5_item_status  VARCHAR(128) NOT NULL DEFAULT ''
+                    pos5_item_status  VARCHAR(128) NOT NULL DEFAULT '',
+                    robot_curr_pos    INTEGER,
+                    robot_next_pos    INTEGER,
+                    robot_joints      INTEGER[] NOT NULL DEFAULT '{}',
+                    robot_pose        VARCHAR(128) NOT NULL DEFAULT ''
                 )
             """)
-            # Migrate existing tables that predate pos5
+            # Migrate existing tables
             await cur.execute("""
                 ALTER TABLE production_line
                     ADD COLUMN IF NOT EXISTS pos5_item_present BOOLEAN NOT NULL DEFAULT false,
-                    ADD COLUMN IF NOT EXISTS pos5_item_status  VARCHAR(128) NOT NULL DEFAULT ''
+                    ADD COLUMN IF NOT EXISTS pos5_item_status  VARCHAR(128) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS robot_pose        VARCHAR(128) NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS robot_joints      INTEGER[] NOT NULL DEFAULT '{}'
+            """)
+            # Replace old array-typed robot_curr_pos/next_pos with INTEGER
+            await cur.execute("""
+                ALTER TABLE production_line
+                    DROP COLUMN IF EXISTS robot_curr_pos,
+                    DROP COLUMN IF EXISTS robot_next_pos
+            """)
+            await cur.execute("""
+                ALTER TABLE production_line
+                    ADD COLUMN IF NOT EXISTS robot_curr_pos INTEGER,
+                    ADD COLUMN IF NOT EXISTS robot_next_pos INTEGER
             """)
         await self._conn.commit()
 
     async def write(self, states: dict[int, bool], statuses: dict[int, str] | None = None):
+        """Update only station detection columns. Never touches robot_* fields."""
         s = statuses or {}
         async with self._conn.cursor() as cur:
             await cur.execute(

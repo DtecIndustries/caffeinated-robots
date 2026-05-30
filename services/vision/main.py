@@ -5,6 +5,7 @@ import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 from config import (
     CAMERA_INDEX, CAMERA_URL,
@@ -29,11 +30,22 @@ detector = BoxDetector(
 )
 writer = StationWriter()
 
-# Shared state — derived from STATIONS, no hardcoding
 station_states: dict[int, bool] = {sid: False for sid in STATION_IDS}
 
+# Forced overrides set by routine.py via /stations/force.
+# None = no override (use CV detection), True/False = forced value.
+forced_states: dict[int, bool | None] = {sid: None for sid in STATION_IDS}
+
+# Robot display state — updated by routine.py via POST /robot/state
+robot_display = {
+    "pose":     "",
+    "curr_pos": None,
+    "next_pos": None,
+    "joints":   [],
+}
 
 DB_DEBOUNCE_S = 1.0
+
 
 async def detection_loop():
     first_seen: dict[int, float | None] = {sid: None for sid in STATION_IDS}
@@ -48,7 +60,11 @@ async def detection_loop():
 
             confirmed: dict[int, bool] = {}
             for sid, detected in raw.items():
-                if detected:
+                if forced_states.get(sid) is not None:
+                    # Routine has overridden this station — skip CV for it
+                    first_seen[sid] = None
+                    confirmed[sid] = forced_states[sid]
+                elif detected:
                     if first_seen[sid] is None:
                         first_seen[sid] = now
                     confirmed[sid] = (now - first_seen[sid]) >= DETECTION_CONFIRM_DELAY
@@ -84,7 +100,89 @@ app.include_router(stream_router)
 
 @app.get("/status")
 def status():
-    return JSONResponse({f"station_{k}": v for k, v in station_states.items()})
+    return JSONResponse({
+        **{f"station_{k}": v for k, v in station_states.items()},
+        **{f"station_{k}_forced": forced_states[k] for k in STATION_IDS},
+    })
+
+
+class ForceBody(BaseModel):
+    station: int
+    value: bool | None  # True/False to force, null to release back to CV
+
+
+@app.post("/stations/force")
+def force_station(body: ForceBody):
+    if body.station not in STATION_IDS:
+        return JSONResponse({"error": f"unknown station {body.station}"}, status_code=400)
+    forced_states[body.station] = body.value
+    return JSONResponse({"station": body.station, "forced": body.value})
+
+
+@app.post("/stations/force/clear")
+def clear_all_forces():
+    for sid in STATION_IDS:
+        forced_states[sid] = None
+    return JSONResponse({"cleared": True})
+
+
+class RobotStateBody(BaseModel):
+    pose:     str = ""
+    curr_pos: int | None = None
+    next_pos: int | None = None
+    joints:   list[int] = []
+
+
+@app.post("/robot/state")
+def update_robot_display(body: RobotStateBody):
+    robot_display.update(body.model_dump())
+    return JSONResponse({"ok": True})
+
+
+def _draw_hud(frame: cv2.typing.MatLike) -> cv2.typing.MatLike:
+    h, w = frame.shape[:2]
+    font       = cv2.FONT_HERSHEY_SIMPLEX
+    font_small = 0.45
+    font_large = 0.55
+    pad        = 8
+    line_h     = 18
+
+    forced_tags = [
+        f"P{sid}={'T' if v else 'F'}(forced)" if v is not None else f"P{sid}=cv"
+        for sid, v in forced_states.items()
+    ]
+    joints_str = str(robot_display["joints"]) if robot_display["joints"] else "—"
+
+    lines = [
+        ("STATIONS", [
+            "  " + "  ".join(
+                f"P{sid}:{'YES' if station_states[sid] else 'NO '}" for sid in STATION_IDS
+            ),
+            "  " + "  ".join(forced_tags),
+        ]),
+        ("ROBOT", [
+            f"  pose:   {robot_display['pose'] or '—'}",
+            f"  at:     {robot_display['curr_pos']}   next: {robot_display['next_pos']}",
+            f"  joints: {joints_str}",
+        ]),
+    ]
+
+    total   = sum(1 + len(v) for _, v in lines)
+    panel_h = total * line_h + pad * 2
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (w, panel_h), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+
+    y = pad + line_h
+    for section, section_lines in lines:
+        cv2.putText(frame, section, (pad, y), font, font_large, (180, 180, 180), 1)
+        y += line_h
+        for text in section_lines:
+            cv2.putText(frame, text, (pad, y), font, font_small, (220, 220, 220), 1)
+            y += line_h
+
+    return frame
 
 
 def _debug_frames():
@@ -96,6 +194,7 @@ def _debug_frames():
         h, w = annotated.shape[:2]
         scale = min(STREAM_WIDTH / w, STREAM_HEIGHT / h)
         annotated = cv2.resize(annotated, (int(w * scale), int(h * scale)))
+        annotated = _draw_hud(annotated)
         _, buf = cv2.imencode(".jpg", annotated)
         yield (
             b"--frame\r\n"

@@ -23,6 +23,7 @@ port     = os.getenv("ROBOT_PORT", "/dev/ttyUSB0")
 ids      = list(targets.keys())
 
 from robot.servo_client import ServoClient
+from db.robot_writer import update_robot_state
 
 STEPS = 50
 
@@ -62,6 +63,10 @@ try:
         print("\nCancelled.")
         sys.exit(0)
 
+    curr_list   = [currents[sid] for sid in ids]
+    target_list = [targets[sid]  for sid in ids]
+    update_robot_state(curr_pos=curr_list, next_pos=target_list, pose="move_to")
+
     delay = duration / STEPS
     for step in range(1, STEPS + 1):
         t = step / STEPS
@@ -73,6 +78,7 @@ try:
 
     print("Done.")
     final = client.read_positions()
+    update_robot_state(curr_pos=[final[sid] for sid in ids], next_pos=[], pose="move_to")
     print()
     print(f"{'Servo':<8} {'Target':>10} {'Actual':>10}")
     print("-" * 32)

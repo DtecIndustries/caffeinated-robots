@@ -1,39 +1,117 @@
 """
 Run a sequence of poses with pauses in between, then unlock motors.
 
-Edit the POSES list below to define your routine.
-Each pose is 6 servo positions (IDs 1–6), in ticks (0–4095).
-
 Usage:
     uv run routine.py
 """
 import os
+import json
 import time
+import urllib.request
 from dotenv import load_dotenv
 
 load_dotenv()
 
+_VISION_URL = f"http://localhost:{os.getenv('STREAM_PORT', '8000')}"
+
+
+def _force_station(station: int, value: bool | None):
+    try:
+        data = json.dumps({"station": station, "value": value}).encode()
+        req = urllib.request.Request(
+            f"{_VISION_URL}/stations/force",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=1)
+    except Exception as e:
+        print(f"  [force] {e}")
+
+
+def _apply_forces(forces: dict[int, bool | None]):
+    for station, value in forces.items():
+        _force_station(station, value)
+
+
+def _update_robot_display(pose: str, curr_pos, next_pos, joints: list[int]):
+    try:
+        data = json.dumps({
+            "pose": pose, "curr_pos": curr_pos,
+            "next_pos": next_pos, "joints": joints,
+        }).encode()
+        req = urllib.request.Request(
+            f"{_VISION_URL}/robot/state",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=1)
+    except Exception:
+        pass
+
+
 # ── Define your routine here ──────────────────────────────────────────────────
 #
-#  Each entry: (name, [p1, p2, p3, p4, p5, p6])
-#           or (name, [p1, p2, p3, p4, p5, p6], pause_seconds)
-#
-#  name        — label printed to console, purely cosmetic
-#  positions   — 6 servo ticks (0–4095)
-#  pause_s     — optional, overrides DEFAULT_PAUSE for this pose only
+# Fields:
+#   name      — label shown in console + stored as robot_pose in DB
+#   positions — 6 servo ticks (0–4095), one per joint
+#   pause     — seconds to hold this pose (default: DEFAULT_PAUSE)
+#   station   — station number where gripper is at this pose (stored as robot_curr_pos)
+#   forces    — {station_id: True/False/None} applied before moving
+#               True/False locks a station's value; None releases back to CV
 
 POSES = [
-    ("home",   [2052, 1132, 2574, 3011, 2069, 1816]),
-    ("move_above", [2060, 1955, 1907, 2865, 2069, 1825], 4.0),
-    ("open_gripper", [2060, 1955, 1907, 2865, 2069, 2603], 4.0),
-    ("reach_down", [2045, 2301, 1951, 2778, 2069, 2603], 5.0),
-    ("close_gripper", [2045, 2301, 1951, 2778, 2069, 2053], 6.0),
-    ("move_up", [2052, 1955, 1907, 2865, 2069, 2053], 4.0),
-    ("home_again", [2052, 1131, 2573, 3011, 2069, 2053]),
+    {
+        "name":      "home",
+        "positions": [2052, 1132, 2574, 3011, 2069, 1816],
+    },
+    {
+        "name":      "move_above",
+        "positions": [2060, 1955, 1907, 2865, 2069, 1825],
+        "pause":     4.0,
+        "station":   0,
+        "forces":    {3: True, 4: True},
+    },
+    {
+        "name":      "open_gripper",
+        "positions": [2060, 1955, 1907, 2865, 2069, 2603],
+        "pause":     4.0,
+        "station":   4,
+        "forces":    {3: True, 4: True},
+    },
+    {
+        "name":      "reach_down",
+        "positions": [2045, 2301, 1951, 2778, 2069, 2603],
+        "pause":     5.0,
+        "station":   4,
+        "forces":    {3: True, 4: True},
+    },
+    {
+        "name":      "close_gripper",
+        "positions": [2045, 2301, 1951, 2778, 2069, 2053],
+        "pause":     6.0,
+        "station":   4,
+        "forces":    {3: True, 4: True},
+    },
+    {
+        "name":      "move_up",
+        "positions": [2052, 1955, 1907, 2865, 2069, 2053],
+        "pause":     4.0,
+        "station":   4,
+        "forces":    {3: True, 4: True},
+    },
+    {
+        "name":      "home_again",
+        "positions": [2052, 1131, 2573, 3011, 2069, 2053],
+        "pause":     4.0,
+        "station":   0,
+        "forces":    {3: None, 4: None},
+    },
 ]
 
-MOVE_SPEED    = 250   # hardware speed limit per servo (0 = max, ~100 = slow, ~500 = normal)
-DEFAULT_PAUSE = 4.0   # seconds to hold each pose (can be overridden per pose above)
+MOVE_SPEED    = 250
+DEFAULT_PAUSE = 4.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -41,6 +119,7 @@ port = os.getenv("ROBOT_PORT", "/dev/ttyUSB0")
 ids  = [int(i) for i in os.getenv("ROBOT_SERVO_IDS", "1 2 3 4 5 6").split()]
 
 from robot.servo_client import ServoClient
+from db.robot_writer import update_robot_state
 
 
 def move_to_pose(client: ServoClient, name: str, targets: dict[int, int]):
@@ -54,16 +133,34 @@ try:
     client.connect()
     print(f"Connected — running {len(POSES)} pose routine\n")
 
-    # Set hardware speed limit on all servos — smooth, no software jitter
     client.set_speed_all(MOVE_SPEED)
 
-    for entry in POSES:
-        name, positions, *rest = entry
-        pause = rest[0] if rest else DEFAULT_PAUSE
-        targets = dict(zip(ids, positions))
+    for i, pose in enumerate(POSES):
+        name      = pose["name"]
+        positions = pose["positions"]
+        pause     = pose.get("pause", DEFAULT_PAUSE)
+        station   = pose.get("station")
+        forces    = pose.get("forces", {})
+
+        next_station = next(
+            (p["station"] for p in POSES[i + 1:] if "station" in p), None
+        )
+
+        if forces:
+            _apply_forces(forces)
+
+        targets     = dict(zip(ids, positions))
+        curr_joints = list(client.read_positions().values())
+        update_robot_state(curr_pos=station, next_pos=next_station, joints=curr_joints, pose=name)
+        _update_robot_display(pose=name, curr_pos=station, next_pos=next_station, joints=curr_joints)
+
         move_to_pose(client, name, targets)
         print(f"  holding {pause}s...")
         time.sleep(pause)
+
+        settled_joints = list(client.read_positions().values())
+        update_robot_state(curr_pos=station, next_pos=next_station, joints=settled_joints, pose=name)
+        _update_robot_display(pose=name, curr_pos=station, next_pos=next_station, joints=settled_joints)
 
     print("\nRoutine complete.")
 
