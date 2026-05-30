@@ -5,6 +5,11 @@ detected. We post it to Discord and mark it 'ticketed'. If the row carries a
 photo (base64 in image_b64), we upload it as a Discord attachment so the
 supervisor can eyeball the fault. The supervisor then resolves it via Discord
 (see supervisor_agent.py), which the robot code reads.
+
+The photo is read in chunks: the Soda Straw execute_query tool truncates cells
+at ~4000 chars, so a full camera-frame base64 (often 5-10 KB) would arrive
+corrupted in a single SELECT. We fetch it via substring() in <4000-char pieces
+and reassemble — keeping everything through the governed straw.
 """
 import asyncio
 import base64
@@ -16,9 +21,10 @@ import sodastraw as straw
 from config import DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, MONITOR_INTERVAL
 
 DISCORD_API = "https://discord.com/api/v10"
+CHUNK = 3900  # stay safely under the straw's ~4000-char cell truncation
 
 OPEN_FAULTS_SQL = """
-SELECT id, station_pos, fault, confidence, image_b64
+SELECT id, station_pos, fault, confidence
 FROM faulty_parts
 WHERE status = 'open'
 ORDER BY detected_at ASC
@@ -47,8 +53,28 @@ def _embed(f):
     }
 
 
+async def _fetch_image_b64(fault_id):
+    """Read image_b64 in <4000-char chunks (the straw truncates larger cells)."""
+    meta = await straw.sql(
+        "SELECT length(image_b64) AS n FROM faulty_parts WHERE id = :id",
+        intent=f"Get photo length for faulty part {fault_id}", params={"id": fault_id})
+    n = (meta[0]["n"] if meta else None) or 0
+    if n == 0:
+        return None
+    parts = []
+    off = 1
+    while off <= n:
+        rows = await straw.sql(
+            "SELECT substring(image_b64 FROM :off FOR :len) AS chunk FROM faulty_parts WHERE id = :id",
+            intent=f"Fetch photo chunk for faulty part {fault_id}",
+            params={"off": off, "len": CHUNK, "id": fault_id})
+        parts.append((rows[0]["chunk"] if rows else "") or "")
+        off += CHUNK
+    return "".join(parts)
+
+
 def _decode_image(value):
-    """If image_b64 holds base64 (not an http URL), decode to (bytes, filename, mime)."""
+    """If the value is base64 (not an http URL), decode to (bytes, filename, mime)."""
     if not value or value.startswith("http"):
         return None
     data = value.split(",", 1)[-1] if value.startswith("data:") else value
@@ -88,9 +114,9 @@ async def _post_with_photo(embed, raw, filename, mime):
         return r.json()
 
 
-async def _post_via_straw(embed, image_b64):
-    if (image_b64 or "").startswith("http"):
-        embed = {**embed, "image": {"url": image_b64}}
+async def _post_via_straw(embed, image_value):
+    if (image_value or "").startswith("http"):
+        embed = {**embed, "image": {"url": image_value}}
     resp = await straw.discord(
         "POST", f"/channels/{DISCORD_CHANNEL_ID}/messages",
         intent="Post a faulty-part ticket to Discord", body={"embeds": [embed]})
@@ -99,14 +125,15 @@ async def _post_via_straw(embed, image_b64):
 
 async def file_ticket(f):
     embed = _embed(f)
-    img = _decode_image(f.get("image_b64"))
+    b64 = await _fetch_image_b64(f["id"])
+    img = _decode_image(b64)
     if img and DISCORD_BOT_TOKEN:
         raw, filename, mime = img
         msg = await _post_with_photo(embed, raw, filename, mime)
     else:
         if img and not DISCORD_BOT_TOKEN:
             print("[monitor] photo present but DISCORD_BOT_TOKEN not set — posting ticket without it")
-        msg = await _post_via_straw(embed, f.get("image_b64"))
+        msg = await _post_via_straw(embed, b64)
 
     message_id = msg.get("id")
     await straw.sql(
