@@ -5,32 +5,49 @@ the vision service writes to.
 
 ## What it does
 
-- **Overview dashboard** (`/`) — the control-room view. Live count of faulty
-  parts on the line, severity/station rollups, and a feed of defect cards that
-  flashes when a new defect appears. The alert surfaces here, on the dashboard
-  (no Discord). Each card links to the operator view for that part.
-- **Operator repair dashboard** (`/operator`) — a different, focused template
-  meant to be opened at the line. For one part it shows **what** is defective
-  (defect, severity, reason), the **camera capture** taken at detect time (only
-  when one is stored), **where** it is on the line (station strip with the
-  current station pinned), and **how to fix it** (tools, a tap-to-check step
-  list, and disposition). Open it for a specific defect with
-  `/operator?product_id=<id>`; with no id it auto-selects the most urgent one.
+- **Overview dashboard** (`/`) — the control-room view. A line-status headline
+  (**LINE ON HOLD** while a defect awaits the supervisor's decision, **NO-GO
+  removing** while the robot pulls a part, **LINE RUNNING** when clear), a live
+  count, severity/station rollups, and a feed of defect cards that flashes when
+  a new one appears. The alert surfaces here, on the dashboard (no Discord).
+- **Operator dashboard** (`/operator`) — a focused template for the line. For
+  one part it shows **what** is defective (the defect + severity), the **camera
+  capture** taken at detect time (only when one is stored), **where** it is on
+  the line (station strip with the current station pinned), and the **live
+  status / required action** (awaiting GO-NO-GO, or NO-GO being removed by the
+  robot). Open a specific defect with `/operator?product_id=<id>`; with no id it
+  auto-selects the most urgent one. Both views **clear automatically** when no
+  defect remains.
 
-## Defect source
+## Defect source & lifecycle
 
-Defects come from the vision service's **`faulty_parts`** table. A part is
-**faulty** (still needs attention) while its `status` is anything other than
-`resolved`. The query lives in [db.py](db.py) (`_FAULTY_SQL`), joined to
-`stations` by `station_pos` for the line location.
+Defects come from the vision service's **`faulty_parts`** table. The only fault
+the vision pipeline raises is **`paint NOK`** (the part isn't correctly painted).
 
-The camera snapshot is stored by the vision service as a base64-encoded JPEG in
-`faulty_parts.image_b64`. The dashboard decodes it on demand, sniffs the type
-(JPEG/PNG), and serves the raw bytes — and only shows the image when the column
-holds a real, decodable image (legacy/placeholder rows are skipped).
+A part is shown on the line while it still needs attention, and **drops off the
+line** as soon as any of these is true:
 
-Repair guidance isn't a DB column — it's derived in [repair.py](repair.py),
-keyed first by the `fault` text, then by station, then a generic fallback.
+- **GO** — supervisor ruled it a false positive (`resolution = 'go'`); the part
+  continues.
+- **robot handled** — the robot pulled it off the line (`robot_acked = true`,
+  with `robot_acked_at`).
+- it no longer exists.
+
+While on the line a defect is in one of two phases:
+
+- **awaiting resolution** (`resolution IS NULL`) → the report states **LINE ON
+  HOLD**, and
+- **NO-GO removing** (`resolution = 'no_go'`, not yet handled) → the robot is
+  pulling it.
+
+So the line filter is `robot_acked = false AND resolution IS DISTINCT FROM 'go'`.
+The query lives in [db.py](db.py) (`_FAULTY_SQL`), joined to `stations` by
+`station_pos` for the line location.
+
+The camera snapshot is stored by the vision service as a base64-encoded JPEG
+(the cropped station ROI) in `faulty_parts.image_b64`. The dashboard decodes it
+on demand, sniffs the type (JPEG/PNG), and serves the raw bytes — and only shows
+the image when the column holds a real, decodable image.
 
 ## API
 

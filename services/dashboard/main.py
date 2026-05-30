@@ -1,9 +1,13 @@
 """Caffeinated Robots — Quality dashboards.
 
-Two templates over one defect rule:
-  GET /            Overview / supervisor dashboard — live faulty-part count + feed.
-  GET /operator    Operator repair dashboard — what is defect, where on the line,
-                   and step-by-step repair instructions for one part.
+Two templates over the live faulty_parts state:
+  GET /            Overview — line status (ON HOLD / clear) + live defect feed.
+  GET /operator    Operator view — what is defective, where on the line, the
+                   camera capture, and the current state / required action.
+
+A defect is on the line while it's unresolved (or NO-GO pending robot removal);
+it drops off once it's a GO (false positive), the robot has handled it, or it no
+longer exists.
 
 JSON API (polled by the browsers):
   GET /api/summary
@@ -19,7 +23,6 @@ from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 
 import db
-import repair
 from config import HOST, POLL_INTERVAL_MS, PORT
 
 BASE = Path(__file__).parent
@@ -59,28 +62,29 @@ def _severity(row: dict) -> str:
 def _shape(row: dict) -> dict:
     """Map a faulty_parts row to the dashboard's defect contract.
 
-    `product_id` carries the faulty_parts id so the existing dashboard links
-    (/operator?product_id=…) and image route keep working unchanged.
+    Everything reaching the dashboard is an unresolved ticket — i.e. a part the
+    line is on hold for, awaiting the supervisor's GO / NO-GO decision in
+    Discord. (GO, NO-GO and latest-ticket-resolved all clear the line.)
+
+    `product_id` carries the faulty_parts id so the dashboard links
+    (/operator?product_id=…) and the image route stay stable.
     """
-    fault = row.get("fault") or "faulty part"
     return {
         "product_id": row["defect_id"],
-        "label": f"Faulty part #{row['defect_id']}",
-        "sku": None,
-        "batch": None,
-        "product_status": row["status"],
+        "label": f"Part #{row['defect_id']}",
+        "defect": row.get("fault") or "paint NOK",
+        "severity": _severity(row),
         "station_id": row.get("station_id"),
         "station_name": row.get("station_name") or f"station {row['station_pos']}",
         "station_position": row.get("station_pos"),
-        "has_failed_detection": True,
-        "defect": fault,
-        "defect_code": fault.strip().lower(),
-        "severity": _severity(row),
-        "reason": f"Automated inspection flagged this part as “{fault}”.",
         "confidence": row.get("confidence"),
-        "image_url": None,
-        "failed_at": _iso(row.get("detected_at")),
+        "status": row.get("status"),
         "detected_at": _iso(row.get("detected_at")),
+        "phase": "awaiting_resolution",
+        "phase_label": "Awaiting resolution",
+        "phase_message": "⏸ LINE ON HOLD — waiting for the supervisor's GO / NO-GO "
+                         "decision in Discord.",
+        "on_hold": True,
     }
 
 
@@ -95,8 +99,12 @@ async def api_summary():
 @app.get("/api/defects")
 async def api_defects():
     _require_db()
-    rows = await db.list_defects()
-    return {"count": len(rows), "defects": [_shape(r) for r in rows]}
+    defects = [_shape(r) for r in await db.list_defects()]
+    return {
+        "count": len(defects),
+        "on_hold": any(d["on_hold"] for d in defects),
+        "defects": defects,
+    }
 
 
 @app.get("/api/defects/{product_id}")
@@ -106,7 +114,6 @@ async def api_defect(product_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="No faulty part with that id")
     data = _shape(row)
-    data["repair"] = repair.lookup(data["defect_code"], data["station_name"])
     # Surface the camera capture only when a real image has actually been stored.
     capture = await db.get_defect_image_meta(product_id)
     data["has_capture"] = capture is not None
@@ -123,6 +130,31 @@ async def api_defect(product_id: int):
         for s in await db.get_line()
     ]
     return data
+
+
+@app.get("/api/history")
+async def api_history():
+    _require_db()
+    rows = await db.list_history()
+    out = []
+    for r in rows:
+        res = r.get("resolution")
+        out.append({
+            "product_id": r["defect_id"],
+            "defect": r.get("fault") or "paint NOK",
+            "station_name": r.get("station_name") or f"station {r['station_pos']}",
+            "station_position": r.get("station_pos"),
+            "resolution": res,
+            "outcome": "GO — continued" if res == "go" else "NO-GO — removed",
+            "resolution_note": r.get("resolution_note") or "",
+            "resolved_by": r.get("resolved_by") or "",
+            "resolved_at": _iso(r.get("resolved_at")),
+            "detected_at": _iso(r.get("detected_at")),
+            "robot_acked": r.get("robot_acked"),
+            "has_capture": r.get("has_image"),
+            "capture_url": f"/api/defects/{r['defect_id']}/image" if r.get("has_image") else None,
+        })
+    return {"count": len(out), "history": out}
 
 
 @app.get("/api/defects/{product_id}/image")
