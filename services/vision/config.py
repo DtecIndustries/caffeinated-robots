@@ -10,3 +10,7 @@ STREAM_PORT = int(os.getenv("STREAM_PORT", 8000))
 STREAM_FPS = int(os.getenv("STREAM_FPS", 30))
 STREAM_WIDTH = int(os.getenv("STREAM_WIDTH", 640))
 STREAM_HEIGHT = int(os.getenv("STREAM_HEIGHT", 480))
+
+DB_URL = os.getenv("DB_URL", "")  # postgresql://user:pass@host/db
+DETECTION_INTERVAL = float(os.getenv("DETECTION_INTERVAL", 0.5))  # seconds between detection runs
+DETECTION_THRESHOLD = float(os.getenv("DETECTION_THRESHOLD", 0.02))  # foreground pixel ratio to count as box present
