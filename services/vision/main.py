@@ -12,7 +12,7 @@ from config import (
     STREAM_HOST, STREAM_PORT,
     STREAM_WIDTH, STREAM_HEIGHT,
     DETECTION_INTERVAL, DETECTION_RATIO_THRESHOLD,
-    DETECTION_BRIGHT_THRESH, DETECTION_DARK_THRESH,
+    DETECTION_BRIGHT_THRESH, DETECTION_RANGE_THRESH,
     DETECTION_CONFIRM_DELAY,
     DB_URL,
 )
@@ -26,11 +26,13 @@ cam = Camera(CAMERA_URL if CAMERA_URL else CAMERA_INDEX)
 detector = BoxDetector(
     ratio_threshold=DETECTION_RATIO_THRESHOLD,
     bright_thresh=DETECTION_BRIGHT_THRESH,
-    dark_thresh=DETECTION_DARK_THRESH,
+    range_thresh=DETECTION_RANGE_THRESH,
 )
 writer = StationWriter()
 
-station_states: dict[int, bool] = {sid: False for sid in STATION_IDS}
+station_states:   dict[int, bool] = {sid: False for sid in STATION_IDS}
+station_statuses: dict[int, str]  = {sid: ""    for sid in STATION_IDS}
+station_colors:   dict[int, str | None] = {sid: None for sid in STATION_IDS}
 
 # Forced overrides set by routine.py via /stations/force.
 # None = no override (use CV detection), True/False = forced value.
@@ -58,24 +60,30 @@ async def detection_loop():
             raw = detector.detect(frame)
             now = time.monotonic()
 
-            confirmed: dict[int, bool] = {}
-            for sid, detected in raw.items():
+            confirmed:  dict[int, bool] = {}
+            statuses:   dict[int, str]  = {}
+            for sid, color in raw.items():
                 if forced_states.get(sid) is not None:
-                    # Routine has overridden this station — skip CV for it
                     first_seen[sid] = None
-                    confirmed[sid] = forced_states[sid]
-                elif detected:
+                    confirmed[sid]  = forced_states[sid]
+                    statuses[sid]   = ""
+                elif color is not None:
                     if first_seen[sid] is None:
                         first_seen[sid] = now
-                    confirmed[sid] = (now - first_seen[sid]) >= DETECTION_CONFIRM_DELAY
+                    present = (now - first_seen[sid]) >= DETECTION_CONFIRM_DELAY
+                    confirmed[sid] = present
+                    statuses[sid]  = "FAULTY:SURFACE_DAMAGE" if (present and color == "black") else ""
                 else:
                     first_seen[sid] = None
-                    confirmed[sid] = False
+                    confirmed[sid]  = False
+                    statuses[sid]   = ""
 
             station_states.update(confirmed)
+            station_statuses.update(statuses)
+            station_colors.update(raw)
 
             if DB_URL and confirmed != prev_written and (now - last_write) >= DB_DEBOUNCE_S:
-                await writer.write(confirmed)
+                await writer.write(confirmed, statuses)
                 prev_written = confirmed.copy()
                 last_write = now
 
@@ -102,6 +110,7 @@ app.include_router(stream_router)
 def status():
     return JSONResponse({
         **{f"station_{k}": v for k, v in station_states.items()},
+        **{f"station_{k}_status": v for k, v in station_statuses.items()},
         **{f"station_{k}_forced": forced_states[k] for k in STATION_IDS},
     })
 
@@ -156,7 +165,8 @@ def _draw_hud(frame: cv2.typing.MatLike) -> cv2.typing.MatLike:
     lines = [
         ("STATIONS", [
             "  " + "  ".join(
-                f"P{sid}:{'YES' if station_states[sid] else 'NO '}" for sid in STATION_IDS
+                f"P{sid}:{'FAULTY' if station_statuses[sid] else ('YES' if station_states[sid] else 'NO')}"
+                for sid in STATION_IDS
             ),
             "  " + "  ".join(forced_tags),
         ]),
@@ -190,7 +200,7 @@ def _debug_frames():
         frame = cam.read()
         if frame is None:
             continue
-        annotated = detector.annotated(frame, station_states)
+        annotated = detector.annotated(frame, station_colors)
         h, w = annotated.shape[:2]
         scale = min(STREAM_WIDTH / w, STREAM_HEIGHT / h)
         annotated = cv2.resize(annotated, (int(w * scale), int(h * scale)))
