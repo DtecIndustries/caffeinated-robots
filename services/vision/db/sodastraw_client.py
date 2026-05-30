@@ -9,6 +9,7 @@ class StationWriter:
     async def connect(self):
         self._conn = await psycopg.AsyncConnection.connect(DB_URL)
         await self._ensure_table()
+        await self._ensure_faulty_parts()
 
     async def _ensure_table(self):
         async with self._conn.cursor() as cur:
@@ -49,6 +50,29 @@ class StationWriter:
                 ALTER TABLE production_line
                     ADD COLUMN IF NOT EXISTS robot_curr_pos INTEGER,
                     ADD COLUMN IF NOT EXISTS robot_next_pos INTEGER
+            """)
+        await self._conn.commit()
+
+    async def _ensure_faulty_parts(self):
+        async with self._conn.cursor() as cur:
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS faulty_parts (
+                    id                 BIGSERIAL PRIMARY KEY,
+                    detected_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    station_pos        INTEGER,
+                    fault              TEXT NOT NULL,
+                    confidence         REAL,
+                    image_base64       TEXT,
+                    status             TEXT NOT NULL DEFAULT 'open',
+                    discord_message_id TEXT,
+
+                    resolution         TEXT,
+                    resolution_note    TEXT,
+                    resolved_by        TEXT DEFAULT NULL,
+                    resolved_at        TIMESTAMPTZ DEFAULT NULL,
+
+                    robot_acked        BOOLEAN NOT NULL DEFAULT FALSE
+                )
             """)
         await self._conn.commit()
 
