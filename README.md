@@ -1,6 +1,42 @@
 # Caffeinated Robots
 
-Hackers & Ravers submission.
+Hackers & Ravers submission — a real-time QC system for a robot assembly line. A computer vision service reads the camera, detects part presence and defects per station, and drives a Feetech servo arm. A 3D digital twin reads the database and visualises the production line live.
+
+Built on Soda Straw — proving it doesn't just connect digital products, but bridges all the way into the physical world.
+
+## Running
+
+**vision + detection + DB sync**
+```bash
+cd services/vision
+cp .env.example .env   # fill in ROBOT_PORT, DB_URL
+uv run main.py
+```
+
+**digital twin**
+```bash
+cd services/twin
+npm install && npm run dev
+```
+
+## Vision service endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /stream` | Raw MJPEG camera feed |
+| `GET /debug` | Annotated feed with station overlays and HUD |
+| `GET /status` | Current station states as JSON |
+| `POST /stations/force` | Override a station's detected state |
+| `POST /robot/state` | Update robot display state (called by routine) |
+
+## Database tables (PostgreSQL)
+
+| Table | Purpose |
+|---|---|
+| `production_line` | Singleton row — current state of all 5 stations + robot |
+| `faulty_parts` | One row per detected defect, with image snapshot |
+
+Local SQLite (`local.db`) mirrors the same structure and syncs upstream on change.
 
 ## Structure
 
