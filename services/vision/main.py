@@ -246,8 +246,15 @@ def _debug_frames():
         if frame is None:
             continue
         vision_dict = {
-            **{f"pos{sid}_item_present": station_colors[sid] is not None for sid in STATION_IDS},
-            **{f"pos{sid}_item_status":  station_statuses[sid] for sid in STATION_IDS},
+            **{
+                f"pos{sid}_item_present": (
+                    forced_states[sid]              # forced value takes priority
+                    if forced_states[sid] is not None
+                    else station_colors[sid] is not None  # otherwise raw CV
+                )
+                for sid in STATION_IDS
+            },
+            **{f"pos{sid}_item_status": station_statuses[sid] for sid in STATION_IDS},
         }
         calculated = apply_rules(vision_dict, robot_display)
         annotated  = detector.annotated(frame, station_colors, calculated)
