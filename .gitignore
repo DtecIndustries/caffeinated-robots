@@ -27,3 +27,9 @@ services/vision/.cam_check/
 
 # OS
 .DS_Store
+
+# DB secrets
+infra/db/.env
+
+# supervisor bot runtime state
+services/supervisor/.supervisor_state.json
