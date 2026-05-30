@@ -13,6 +13,7 @@ import sys
 import json
 import time
 import urllib.request
+import psycopg
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -58,6 +59,23 @@ def _update_robot_display(pose: str, curr_pos, next_pos, joints: list[int]):
 
 GRIPPER_OPEN   = 2603
 GRIPPER_CLOSED = 2060
+
+_DB_URL = os.getenv("DB_URL", "")
+
+
+def _ack_faulty_parts():
+    """Mark all unacknowledged faulty_parts records as robot_acked=true."""
+    if not _DB_URL:
+        return
+    try:
+        with psycopg.connect(_DB_URL) as conn:
+            cur = conn.execute(
+                "UPDATE faulty_parts SET robot_acked = true WHERE robot_acked = false"
+            )
+            conn.commit()
+            print(f"  [db] robot_acked set on {cur.rowcount} record(s).")
+    except Exception as e:
+        print(f"  [db] ack failed: {e}")
 
 # ── Define your actions here ──────────────────────────────────────────────────
 #
@@ -435,6 +453,9 @@ try:
         _update_robot_display(pose=name, curr_pos=station, next_pos=next_station, joints=settled_joints)
 
     print("\nRoutine complete.")
+
+    if action_name in ("5_4", "5_R"):
+        _ack_faulty_parts()
 
 except KeyboardInterrupt:
     print("\nInterrupted.")
