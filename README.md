@@ -41,70 +41,55 @@ Local SQLite (`local.db`) mirrors the same structure and syncs upstream on chang
 ## Structure
 
 ```
-│
 ├── README.md
 ├── .gitignore
-├── .env.example
 │
-├── services/
-│   │
-│   ├── vision/                          # Python — Camera + CV + streaming
-│   │   ├── README.md
-│   │   ├── requirements.txt
-│   │   ├── main.py                      # Entry point
-│   │   ├── config.py                    # Env vars, camera IDs, thresholds
-│   │   │
-│   │   ├── camera/
-│   │   │   ├── __init__.py
-│   │   │   ├── stream.py                # MJPEG stream server (Flask/FastAPI)
-│   │   │   └── capture.py               # OpenCV capture abstraction
-│   │   │
-│   │   ├── detection/
-│   │   │   ├── __init__.py
-│   │   │   ├── detector.py              # Box/object detection logic
-│   │   │   ├── station.py               # Station state machine (pos x → status)
-│   │   │   └── models/                  # Any CV model weights
-│   │   │
-│   │   ├── robot/
-│   │   │   ├── __init__.py
-│   │   │   └── lerobot_bridge.py        # LeRobot state reader
-│   │   │
-│   │   └── db/
-│   │       ├── __init__.py
-│   │       └── sodastraw_client.py      # Writes detection events to online DB
-│   │
-│   └── twin/                            # JS — Digital twin frontend
-│       ├── README.md
-│       ├── package.json
-│       ├── vite.config.js
-│       │
-│       ├── src/
-│       │   ├── main.js
-│       │   ├── config.js                # DB endpoints, camera URLs, env
-│       │   │
-│       │   ├── scene/
-│       │   │   ├── SceneManager.js      # Three.js setup, lights, camera
-│       │   │   ├── ProductionLine.js    # Conveyor, stations, boxes in 3D
-│       │   │   └── RobotModel.js        # Robot arm visualization
-│       │   │
-│       │   ├── data/
-│       │   │   ├── DbClient.js          # Reads from online or local DB
-│       │   │   ├── StateSync.js         # Polls/subscribes, drives scene updates
-│       │   │   └── mock.js              # Local fallback data for offline dev
-│       │   │
-│       │   └── ui/
-│       │       ├── CameraFeed.js        # Overlays MJPEG stream in the scene
-│       │       ├── StatusPanel.js       # HUD — QC status, station states
-│       │       └── RobotPanel.js        # Robot joint states, current action
-│       │
-│       └── public/
-│           └── models/                  # GLTF/GLB assets for robot/line
-│
-├── shared/                              # Shared contracts between services
-│   ├── schema.md                        # Canonical DB table/event schema
-│   └── events.md                        # Event types (box_detected, qc_pass, etc.)
-│
-└── infra/
-    ├── ngrok.yml                        # Ngrok tunnel config
-    └── .env.example                     # Template for all services
+└── services/
+    │
+    ├── vision/                          # Python — camera, CV, robot, DB
+    │   ├── main.py                      # FastAPI entry point
+    │   ├── config.py                    # All env vars
+    │   ├── routine.py                   # Robot action sequences (3_4, 3_5, 5_4, 5_R)
+    │   ├── pyproject.toml
+    │   │
+    │   ├── camera/
+    │   │   ├── capture.py               # OpenCV webcam capture
+    │   │   └── stream.py                # MJPEG stream endpoint
+    │   │
+    │   ├── detection/
+    │   │   ├── detector.py              # Brightness/range threshold detection → good/faulty
+    │   │   └── station.py               # ROI definitions + crop_roi helper
+    │   │
+    │   ├── robot/
+    │   │   └── servo_client.py          # Feetech servo protocol over serial
+    │   │
+    │   ├── db/
+    │   │   ├── sodastraw_client.py      # PostgreSQL — production_line + faulty_parts
+    │   │   ├── sqlite_client.py         # Local SQLite buffer (vision, robot, vision_calculated)
+    │   │   ├── upstream_sync.py         # Event-driven SQLite → PostgreSQL sync
+    │   │   ├── robot_writer.py          # Sync robot state to SQLite + PostgreSQL
+    │   │   └── rules.py                 # Business logic (robot pos overrides CV)
+    │   │
+    │   └── (util scripts)
+    │       ├── find_port.py             # Detect robot serial port by unplugging
+    │       ├── list_cams.py             # Snapshot all cameras to find index
+    │       ├── read_servos.py           # Live servo position reader
+    │       ├── move_test.py             # Move single servo by delta
+    │       ├── move_to.py               # Move all servos to a pose
+    │       └── torque_off.py            # Emergency motor release
+    │
+    └── twin/                            # JS — Three.js digital twin
+        ├── index.html
+        ├── package.json
+        │
+        ├── src/
+        │   ├── main.js
+        │   ├── config.js
+        │   ├── scene/                   # Three.js scene — crane, conveyor, boxes
+        │   ├── data/                    # StateSync, mock data, robot state
+        │   └── ui/                      # StatusPanel, DebugPanel
+        │
+        └── server/                      # Vite middleware — DB proxy
+            ├── fetch-state.mjs
+            └── map-state.mjs
 ```
