@@ -22,3 +22,17 @@ STATIONS: list[Station] = [
 ]
 
 STATION_IDS = [s.id for s in STATIONS]
+STATION_BY_ID: dict[int, Station] = {s.id: s for s in STATIONS}
+
+
+def crop_roi(frame, station_id: int):
+    """Crop a frame to a station's ROI. Falls back to the full frame if the
+    station is unknown or the crop would be empty."""
+    s = STATION_BY_ID.get(station_id)
+    if s is None:
+        return frame
+    h, w = frame.shape[:2]
+    x1, y1 = int(s.x1 * w), int(s.y1 * h)
+    x2, y2 = int(s.x2 * w), int(s.y2 * h)
+    crop = frame[y1:y2, x1:x2]
+    return crop if crop.size else frame

@@ -1,41 +1,67 @@
 """Repair playbook lookup for the operator dashboard.
 
-Repair guidance isn't stored as a column, so we derive it: first by the
-machine-readable `defect_code` on the detection payload, then fall back to a
-station-level default, then a generic catch-all. Each entry yields the fields
-the operator dashboard renders: a one-line summary, an ordered checklist of
-steps, the tools required, and a recommended disposition.
+Repair guidance isn't stored as a column, so we derive it: first by the fault
+text the vision service records on `faulty_parts.fault` (lowercased), then fall
+back to a station-level default, then a generic catch-all. Each entry yields the
+fields the operator dashboard renders: a one-line summary, an ordered checklist
+of steps, the tools required, and a recommended disposition.
 """
 
-# Keyed by detection payload `defect_code`.
+# Keyed by the lowercased `faulty_parts.fault` text.
 _BY_CODE = {
-    "SURF_SCRATCH": {
-        "summary": "Surface scratch beyond cosmetic tolerance.",
-        "tools": ["Polishing pad", "Grit-2000 paper", "Calipers"],
+    "surface damage": {
+        "summary": "Surface anomaly — part is not conforming (non-white in the QC view).",
+        "tools": ["Polishing pad", "Grit-2000 paper", "Inspection loupe"],
         "steps": [
             "Lock out the conveyor segment at this station before reaching in.",
-            "Lift the part and confirm the scratch location against the QC image.",
-            "Wet-sand the affected face with grit-2000, then buff with the polishing pad.",
-            "Re-measure depth with calipers — must be under 2.0mm.",
-            "If still out of tolerance, tag the part SCRAP and drop it in the reject bin.",
+            "Lift the part and confirm the damage against the camera capture.",
+            "Wet-sand and buff the affected face, or wipe down if it's surface debris.",
+            "Re-inspect under the loupe; the face should read uniformly clean/white.",
+            "If the damage can't be reworked, tag the part SCRAP and drop it in the reject bin.",
             "Mark the repair complete on this screen to clear the alert.",
         ],
-        "disposition": "Rework in place; scrap if depth > 2.0mm.",
+        "disposition": "Rework in place; scrap if it can't be cleaned up.",
         "est_minutes": 4,
     },
-    "MISALIGN": {
-        "summary": "Component misaligned past the assembly tolerance.",
-        "tools": ["2.5mm hex driver", "Alignment jig", "Feeler gauge"],
+    "bad paint": {
+        "summary": "Paint defect — coating is off-spec (runs, thin coverage, or wrong shade).",
+        "tools": ["Sanding block", "Touch-up paint", "Tack cloth"],
         "steps": [
             "Lock out the conveyor segment at this station.",
-            "Seat the part in the alignment jig.",
-            "Loosen the bracket screws with the 2.5mm hex driver.",
-            "Slide the bracket until the feeler gauge reads under 0.5mm offset.",
-            "Re-torque the screws to 0.6 N·m in a diagonal pattern.",
+            "Compare the finish to the reference against the camera capture.",
+            "Scuff the affected area and wipe with the tack cloth.",
+            "Apply a thin touch-up coat; let it flash before re-stacking.",
+            "If coverage is badly off, divert the part to the repaint queue.",
             "Mark the repair complete on this screen to clear the alert.",
         ],
-        "disposition": "Rework in place; re-run QC after fix.",
-        "est_minutes": 6,
+        "disposition": "Touch up in place; divert to repaint if severe.",
+        "est_minutes": 5,
+    },
+    "label misaligned": {
+        "summary": "Label is skewed or off-position past tolerance.",
+        "tools": ["Label scraper", "Spare labels", "Alignment guide"],
+        "steps": [
+            "Lock out the conveyor segment at this station.",
+            "Peel the misapplied label with the scraper.",
+            "Clean any adhesive residue from the surface.",
+            "Apply a fresh label using the alignment guide.",
+            "Mark the repair complete on this screen to clear the alert.",
+        ],
+        "disposition": "Re-label in place.",
+        "est_minutes": 3,
+    },
+    "packaging broken": {
+        "summary": "Packaging is damaged or open.",
+        "tools": ["Replacement packaging", "Tape gun"],
+        "steps": [
+            "Pull the part from the packaging queue.",
+            "Inspect the part inside for damage from the broken packaging.",
+            "If the part is intact, repackage it; otherwise divert to rework.",
+            "Reseal and return to the line.",
+            "Mark the repair complete on this screen to clear the alert.",
+        ],
+        "disposition": "Repackage; divert part to rework if damaged.",
+        "est_minutes": 4,
     },
 }
 

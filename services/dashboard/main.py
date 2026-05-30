@@ -50,35 +50,38 @@ def _iso(dt):
     return dt.isoformat() if dt else None
 
 
+def _severity(row: dict) -> str:
+    """High-confidence detections are flagged major, the rest minor."""
+    c = row.get("confidence")
+    return "major" if (c is not None and c >= 0.85) else "minor"
+
+
 def _shape(row: dict) -> dict:
-    """Common defect fields shared by the list and detail responses."""
+    """Map a faulty_parts row to the dashboard's defect contract.
+
+    `product_id` carries the faulty_parts id so the existing dashboard links
+    (/operator?product_id=…) and image route keep working unchanged.
+    """
+    fault = row.get("fault") or "faulty part"
     return {
-        "product_id": row["product_id"],
-        "label": row["label"],
-        "sku": row.get("sku"),
-        "batch": row.get("batch"),
-        "product_status": row["product_status"],
+        "product_id": row["defect_id"],
+        "label": f"Faulty part #{row['defect_id']}",
+        "sku": None,
+        "batch": None,
+        "product_status": row["status"],
         "station_id": row.get("station_id"),
-        "station_name": row.get("station_name"),
-        "station_position": row.get("station_position"),
-        "has_failed_detection": row["has_failed_detection"],
-        "defect": row.get("defect") or _status_label(row["product_status"]),
-        "defect_code": row.get("defect_code"),
-        "severity": row.get("severity") or _status_severity(row["product_status"]),
-        "reason": row.get("reason"),
+        "station_name": row.get("station_name") or f"station {row['station_pos']}",
+        "station_position": row.get("station_pos"),
+        "has_failed_detection": True,
+        "defect": fault,
+        "defect_code": fault.strip().lower(),
+        "severity": _severity(row),
+        "reason": f"Automated inspection flagged this part as “{fault}”.",
         "confidence": row.get("confidence"),
-        "image_url": row.get("image_url"),
-        "failed_at": _iso(row.get("failed_at")),
+        "image_url": None,
+        "failed_at": _iso(row.get("detected_at")),
         "detected_at": _iso(row.get("detected_at")),
     }
-
-
-def _status_label(status: str) -> str:
-    return {"rejected": "QC rejected", "hold": "Held for review"}.get(status, "Faulty part")
-
-
-def _status_severity(status: str) -> str:
-    return {"rejected": "major", "hold": "minor"}.get(status, "")
 
 
 # ---- JSON API ---------------------------------------------------------------
@@ -103,8 +106,8 @@ async def api_defect(product_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="No faulty part with that id")
     data = _shape(row)
-    data["repair"] = repair.lookup(row.get("defect_code"), row.get("station_name"))
-    # Surface the camera capture only when one has actually been stored.
+    data["repair"] = repair.lookup(data["defect_code"], data["station_name"])
+    # Surface the camera capture only when a real image has actually been stored.
     capture = await db.get_defect_image_meta(product_id)
     data["has_capture"] = capture is not None
     data["capture_url"] = f"/api/defects/{product_id}/image" if capture else None
@@ -115,7 +118,7 @@ async def api_defect(product_id: int):
             "name": s["name"],
             "position": s["position"],
             "status": s["status"],
-            "is_here": s["id"] == row.get("station_id"),
+            "is_here": s["position"] == row.get("station_pos"),
         }
         for s in await db.get_line()
     ]

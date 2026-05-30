@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import time
 import cv2
 import uvicorn
@@ -19,7 +20,7 @@ from config import (
 from camera.capture import Camera
 from camera.stream import router as stream_router, set_camera
 from detection.detector import BoxDetector
-from detection.station import STATION_IDS
+from detection.station import STATION_IDS, crop_roi
 from db.sodastraw_client import StationWriter
 
 cam = Camera(CAMERA_URL if CAMERA_URL else CAMERA_INDEX)
@@ -49,9 +50,25 @@ robot_display = {
 DB_DEBOUNCE_S = 1.0
 
 
+def _fault_label(status: str) -> str:
+    """Turn an internal status tag (e.g. 'FAULTY:SURFACE_DAMAGE') into a fault name."""
+    if ":" in status:
+        return status.split(":", 1)[1].replace("_", " ").lower()
+    return "surface damage"
+
+
+def _encode_jpeg_b64(frame) -> str | None:
+    """JPEG-encode a frame and base64 it for the faulty_parts.image_b64 column."""
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        return None
+    return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
 async def detection_loop():
     first_seen: dict[int, float | None] = {sid: None for sid in STATION_IDS}
     prev_written: dict[int, bool] = {}
+    prev_faulty: dict[int, bool] = {sid: False for sid in STATION_IDS}
     last_write = 0.0
 
     while True:
@@ -86,6 +103,25 @@ async def detection_loop():
                 await writer.write(confirmed, statuses)
                 prev_written = confirmed.copy()
                 last_write = now
+
+            # Snapshot the camera frame the moment a station toggles into a fault
+            # (rising edge only — one ticket per defect, not per detection tick).
+            if DB_URL:
+                for sid in STATION_IDS:
+                    is_faulty = bool(statuses.get(sid))
+                    if is_faulty and not prev_faulty[sid]:
+                        # Capture only the faulty station's ROI — the exact stage
+                        # the part was flagged at.
+                        image_b64 = _encode_jpeg_b64(crop_roi(frame, sid))
+                        try:
+                            await writer.record_fault(
+                                station_pos=sid,
+                                fault=_fault_label(statuses[sid]),
+                                image_b64=image_b64,
+                            )
+                        except Exception as e:
+                            print(f"  [db] record_fault failed: {e}")
+                    prev_faulty[sid] = is_faulty
 
         await asyncio.sleep(DETECTION_INTERVAL)
 

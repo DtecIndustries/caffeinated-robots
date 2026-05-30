@@ -1,8 +1,9 @@
 """Smoke test for the web layer — no database needed.
 
-Stubs the db module with the same row shape Postgres returns (validated live
-against the caffeinated DB), then drives every route through FastAPI's
-TestClient: JSON shapes, the repair playbook join, and both HTML templates.
+Stubs the db module with the same row shape db.py returns from faulty_parts
+(validated live against the caffeinated DB), then drives every route through
+FastAPI's TestClient: JSON shapes, the repair playbook lookup, the line strip,
+and both HTML templates.
 """
 
 from datetime import datetime, timezone
@@ -10,35 +11,19 @@ from datetime import datetime, timezone
 import db
 import main
 
-_NOW = datetime(2026, 5, 30, 13, 33, 38, tzinfo=timezone.utc)
+_NOW = datetime(2026, 5, 30, 14, 48, 52, tzinfo=timezone.utc)
 
+# Shape mirrors db._FAULTY_SQL output.
 SEED = [
-    {
-        "product_id": 1, "label": "Widget A-1042", "product_status": "rejected",
-        "sku": "WA-1042", "batch": "B-2207", "station_id": 2,
-        "station_name": "inspection", "station_position": 2,
-        "has_failed_detection": True, "failed_at": _NOW, "confidence": 0.94,
-        "image_url": "https://picsum.photos/seed/wa1042/480/320",
-        "defect_code": "SURF_SCRATCH", "defect": "Surface scratch", "severity": "major",
-        "reason": "Surface scratch on top face exceeds 2mm tolerance", "detected_at": _NOW,
-    },
-    {
-        "product_id": 3, "label": "Widget A-1044", "product_status": "in_transit",
-        "sku": "WA-1044", "batch": "B-2208", "station_id": 2,
-        "station_name": "inspection", "station_position": 2,
-        "has_failed_detection": True, "failed_at": _NOW, "confidence": 0.88,
-        "image_url": None, "defect_code": "MISALIGN", "defect": "Component misalignment",
-        "severity": "minor", "reason": "Left bracket offset by 3.1mm beyond tolerance",
-        "detected_at": _NOW,
-    },
-    {
-        "product_id": 2, "label": "Widget A-1043", "product_status": "hold",
-        "sku": "WA-1043", "batch": "B-2207", "station_id": 3,
-        "station_name": "qc_gate", "station_position": 3,
-        "has_failed_detection": False, "failed_at": None, "confidence": None,
-        "image_url": None, "defect_code": None, "defect": "", "severity": "",
-        "reason": "", "detected_at": _NOW,
-    },
+    {"defect_id": 4, "detected_at": _NOW, "station_pos": 1, "fault": "bad paint",
+     "confidence": 0.88, "status": "ticketed", "station_id": 1,
+     "station_name": "intake", "has_image": True},
+    {"defect_id": 5, "detected_at": _NOW, "station_pos": 4, "fault": "label misaligned",
+     "confidence": 0.71, "status": "ticketed", "station_id": 4,
+     "station_name": "packaging", "has_image": True},
+    {"defect_id": 6, "detected_at": _NOW, "station_pos": 5, "fault": "surface damage",
+     "confidence": None, "status": "open", "station_id": None,
+     "station_name": None, "has_image": False},
 ]
 
 LINE = [
@@ -46,6 +31,7 @@ LINE = [
     {"id": 2, "name": "inspection", "position": 2, "status": "idle"},
     {"id": 3, "name": "qc_gate", "position": 3, "status": "idle"},
     {"id": 4, "name": "packaging", "position": 4, "status": "idle"},
+    {"id": None, "name": "station 5", "position": 5, "status": "idle"},
 ]
 
 
@@ -57,24 +43,22 @@ async def _list():
     return list(SEED)
 
 
-async def _get(pid):
-    return next((r for r in SEED if r["product_id"] == pid), None)
+async def _get(did):
+    return next((r for r in SEED if r["defect_id"] == did), None)
 
 
 async def _line():
     return list(LINE)
 
 
-async def _img_meta(pid):
-    return None  # no captured image stored -> dashboard hides the capture block
+async def _img_meta(did):
+    return None  # no decodable image -> dashboard hides the capture block
 
 
 async def _summary():
-    return {
-        "faulty_count": len(SEED),
-        "by_station": {"inspection": 2, "qc_gate": 1},
-        "by_severity": {"major": 1, "minor": 1, "other": 1},
-    }
+    return {"faulty_count": len(SEED),
+            "by_station": {"intake": 1, "packaging": 1, "station 5": 1},
+            "by_severity": {"major": 1, "minor": 2}}
 
 
 db.configured = lambda: True
@@ -97,21 +81,24 @@ with TestClient(main.app) as c:
     first = d["defects"][0]
     assert {"product_id", "label", "defect", "severity", "station_name"} <= first.keys()
 
-    # hold part has no detection payload -> defect/severity backfilled from status
-    hold = next(x for x in d["defects"] if x["product_id"] == 2)
-    assert hold["defect"] == "Held for review" and hold["severity"] == "minor", hold
+    by_id = {x["product_id"]: x for x in d["defects"]}
+    assert by_id[4]["severity"] == "major", by_id[4]      # confidence 0.88
+    assert by_id[5]["severity"] == "minor", by_id[5]      # confidence 0.71
+    assert by_id[6]["severity"] == "minor", by_id[6]      # no confidence
+    assert by_id[6]["station_name"] == "station 5", by_id[6]   # name fallback
+    assert by_id[4]["defect"] == "bad paint", by_id[4]
 
-    det = c.get("/api/defects/1").json()
-    assert det["repair"]["est_minutes"] == 4, det["repair"]
-    assert any(s["is_here"] for s in det["line"]), det["line"]
-    # No image stored -> capture is hidden and the URL is absent.
+    det = c.get("/api/defects/4").json()
+    assert det["repair"]["est_minutes"] == 5, det["repair"]    # "bad paint" playbook
+    here = [x for x in det["line"] if x["is_here"]]
+    assert len(here) == 1 and here[0]["position"] == 1, det["line"]
     assert det["has_capture"] is False and det["capture_url"] is None, det
     assert c.get("/api/defects/999").status_code == 404
 
     ov = c.get("/")
     assert ov.status_code == 200 and "Live defect feed" in ov.text
 
-    op = c.get("/operator?product_id=1")
+    op = c.get("/operator?product_id=4")
     assert op.status_code == 200 and "Repair instructions" in op.text
 
-print("OK — all routes, JSON shapes, and both templates pass.")
+print("OK — all routes, JSON shapes, line strip, and both templates pass.")
