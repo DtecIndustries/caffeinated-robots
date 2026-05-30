@@ -14,7 +14,7 @@ class StationWriter:
         async with self._conn.cursor() as cur:
             await cur.execute("""
                 CREATE TABLE IF NOT EXISTS production_line (
-                    id               SERIAL PRIMARY KEY,
+                    id                SERIAL PRIMARY KEY,
                     pos1_item_present BOOLEAN NOT NULL,
                     pos1_item_status  VARCHAR(128) NOT NULL DEFAULT '',
                     pos2_item_present BOOLEAN NOT NULL,
@@ -22,8 +22,16 @@ class StationWriter:
                     pos3_item_present BOOLEAN NOT NULL,
                     pos3_item_status  VARCHAR(128) NOT NULL DEFAULT '',
                     pos4_item_present BOOLEAN NOT NULL,
-                    pos4_item_status  VARCHAR(128) NOT NULL DEFAULT ''
+                    pos4_item_status  VARCHAR(128) NOT NULL DEFAULT '',
+                    pos5_item_present BOOLEAN NOT NULL DEFAULT false,
+                    pos5_item_status  VARCHAR(128) NOT NULL DEFAULT ''
                 )
+            """)
+            # Migrate existing tables that predate pos5
+            await cur.execute("""
+                ALTER TABLE production_line
+                    ADD COLUMN IF NOT EXISTS pos5_item_present BOOLEAN NOT NULL DEFAULT false,
+                    ADD COLUMN IF NOT EXISTS pos5_item_status  VARCHAR(128) NOT NULL DEFAULT ''
             """)
         await self._conn.commit()
 
@@ -35,8 +43,9 @@ class StationWriter:
                     pos1_item_present, pos1_item_status,
                     pos2_item_present, pos2_item_status,
                     pos3_item_present, pos3_item_status,
-                    pos4_item_present, pos4_item_status
-                ) VALUES (1, %s,%s, %s,%s, %s,%s, %s,%s)
+                    pos4_item_present, pos4_item_status,
+                    pos5_item_present, pos5_item_status
+                ) VALUES (1, %s,%s, %s,%s, %s,%s, %s,%s, %s,%s)
                 ON CONFLICT (id) DO UPDATE SET
                     pos1_item_present = EXCLUDED.pos1_item_present,
                     pos1_item_status  = EXCLUDED.pos1_item_status,
@@ -45,12 +54,15 @@ class StationWriter:
                     pos3_item_present = EXCLUDED.pos3_item_present,
                     pos3_item_status  = EXCLUDED.pos3_item_status,
                     pos4_item_present = EXCLUDED.pos4_item_present,
-                    pos4_item_status  = EXCLUDED.pos4_item_status""",
+                    pos4_item_status  = EXCLUDED.pos4_item_status,
+                    pos5_item_present = EXCLUDED.pos5_item_present,
+                    pos5_item_status  = EXCLUDED.pos5_item_status""",
                 (
-                    states[1], s.get(1, ""),
-                    states[2], s.get(2, ""),
-                    states[3], s.get(3, ""),
-                    states[4], s.get(4, ""),
+                    states.get(1, False), s.get(1, ""),
+                    states.get(2, False), s.get(2, ""),
+                    states.get(3, False), s.get(3, ""),
+                    states.get(4, False), s.get(4, ""),
+                    states.get(5, False), s.get(5, ""),
                 ),
             )
         await self._conn.commit()

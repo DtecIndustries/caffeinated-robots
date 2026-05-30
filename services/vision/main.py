@@ -18,6 +18,7 @@ from config import (
 from camera.capture import Camera
 from camera.stream import router as stream_router, set_camera
 from detection.detector import BoxDetector
+from detection.station import STATION_IDS
 from db.sodastraw_client import StationWriter
 
 cam = Camera(CAMERA_URL if CAMERA_URL else CAMERA_INDEX)
@@ -28,15 +29,14 @@ detector = BoxDetector(
 )
 writer = StationWriter()
 
-# Shared state — last known station booleans
-station_states: dict[int, bool] = {1: False, 2: False, 3: False, 4: False}
+# Shared state — derived from STATIONS, no hardcoding
+station_states: dict[int, bool] = {sid: False for sid in STATION_IDS}
 
 
 DB_DEBOUNCE_S = 1.0
 
 async def detection_loop():
-    # first_seen[id] = monotonic timestamp when continuous detection started, or None
-    first_seen: dict[int, float | None] = {i: None for i in range(1, 5)}
+    first_seen: dict[int, float | None] = {sid: None for sid in STATION_IDS}
     prev_written: dict[int, bool] = {}
     last_write = 0.0
 
