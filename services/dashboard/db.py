@@ -19,8 +19,15 @@ from config import DB_URL
 
 _pool: AsyncConnectionPool | None = None
 
-# Every faulty part the operator still has to deal with, newest first within
-# the Python-side severity sort. station_pos joins to the stations layout.
+# Defects still live on the line, newest first within the Python-side severity
+# sort. station_pos joins to the stations layout.
+#
+# The supervisor resolves tickets over Discord (GO = false positive, the part
+# continues; NO-GO = the part is pulled and the line is cleared). Either way a
+# resolved ticket is off the line. And once the *latest* ticket (highest id) is
+# resolved, the whole batch is considered handled — the line is available again
+# and EVERY remaining ticket drops off. So a defect shows only while it is
+# unresolved AND the most recent ticket is still unresolved.
 _FAULTY_SQL = """
 SELECT
     fp.id                                           AS defect_id,
@@ -29,12 +36,15 @@ SELECT
     fp.fault                                        AS fault,
     fp.confidence                                   AS confidence,
     fp.status                                       AS status,
+    fp.resolution                                   AS resolution,
     s.id                                            AS station_id,
     s.name                                          AS station_name,
     (fp.image_b64 IS NOT NULL AND length(fp.image_b64) > 0) AS has_image
 FROM faulty_parts fp
 LEFT JOIN stations s ON s.position = fp.station_pos
-WHERE fp.status <> 'resolved'
+WHERE fp.resolution IS NULL
+  AND fp.robot_acked = FALSE
+  AND (SELECT resolution FROM faulty_parts ORDER BY id DESC LIMIT 1) IS NULL
 """
 
 # The vision line has five physical positions even though `stations` only names
@@ -94,7 +104,14 @@ async def get_summary() -> dict:
         st = r.get("station_name") or f"station {r['station_pos']}"
         by_station[st] = by_station.get(st, 0) + 1
         by_severity["major" if _severity_rank(r) == 0 else "minor"] += 1
-    return {"faulty_count": len(rows), "by_station": by_station, "by_severity": by_severity}
+    # Everything shown is unresolved → the line is on hold whenever any show.
+    return {
+        "faulty_count": len(rows),
+        "awaiting_resolution": len(rows),
+        "on_hold": len(rows) > 0,
+        "by_station": by_station,
+        "by_severity": by_severity,
+    }
 
 
 async def get_line() -> list[dict]:
@@ -112,6 +129,31 @@ async def get_line() -> list[dict]:
             "status": s["status"] if s else "idle",
         })
     return line
+
+
+async def list_history(limit: int = 50) -> list[dict]:
+    """Resolved defects, most recently resolved first — the defect history."""
+    return await _fetch(
+        """
+        SELECT fp.id                  AS defect_id,
+               fp.detected_at         AS detected_at,
+               fp.station_pos         AS station_pos,
+               fp.fault               AS fault,
+               fp.resolution          AS resolution,
+               fp.resolution_note     AS resolution_note,
+               fp.resolved_by         AS resolved_by,
+               fp.resolved_at         AS resolved_at,
+               fp.robot_acked         AS robot_acked,
+               s.name                 AS station_name,
+               (fp.image_b64 IS NOT NULL AND length(fp.image_b64) > 0) AS has_image
+        FROM faulty_parts fp
+        LEFT JOIN stations s ON s.position = fp.station_pos
+        WHERE fp.resolution IS NOT NULL
+        ORDER BY COALESCE(fp.resolved_at, fp.detected_at) DESC
+        LIMIT %(lim)s
+        """,
+        {"lim": limit},
+    )
 
 
 def _decode_image(image_b64: str | None) -> tuple[bytes, str] | None:

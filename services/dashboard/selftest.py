@@ -2,8 +2,11 @@
 
 Stubs the db module with the same row shape db.py returns from faulty_parts
 (validated live against the caffeinated DB), then drives every route through
-FastAPI's TestClient: JSON shapes, the repair playbook lookup, the line strip,
-and both HTML templates.
+FastAPI's TestClient: JSON shapes, the on-hold logic, the line strip, and both
+HTML templates.
+
+The "latest-ticket-resolved clears the whole board" rule lives in _FAULTY_SQL
+and is verified live against the database, not here (db is stubbed).
 """
 
 from datetime import datetime, timezone
@@ -13,15 +16,13 @@ import main
 
 _NOW = datetime(2026, 5, 30, 14, 48, 52, tzinfo=timezone.utc)
 
-# Shape mirrors db._FAULTY_SQL output.
+# Shape mirrors db._FAULTY_SQL output — only unresolved (on-hold) defects ever
+# reach the dashboard.
 SEED = [
-    {"defect_id": 4, "detected_at": _NOW, "station_pos": 1, "fault": "bad paint",
+    {"defect_id": 4, "detected_at": _NOW, "station_pos": 1, "fault": "paint NOK",
      "confidence": 0.88, "status": "ticketed", "station_id": 1,
      "station_name": "intake", "has_image": True},
-    {"defect_id": 5, "detected_at": _NOW, "station_pos": 4, "fault": "label misaligned",
-     "confidence": 0.71, "status": "ticketed", "station_id": 4,
-     "station_name": "packaging", "has_image": True},
-    {"defect_id": 6, "detected_at": _NOW, "station_pos": 5, "fault": "surface damage",
+    {"defect_id": 5, "detected_at": _NOW, "station_pos": 5, "fault": "paint NOK",
      "confidence": None, "status": "open", "station_id": None,
      "station_name": None, "has_image": False},
 ]
@@ -52,13 +53,24 @@ async def _line():
 
 
 async def _img_meta(did):
-    return None  # no decodable image -> dashboard hides the capture block
+    return None
+
+
+async def _history():
+    return [
+        {"defect_id": 2, "detected_at": _NOW, "station_pos": 3, "fault": "paint NOK",
+         "resolution": "no_go", "resolution_note": "scrap", "resolved_by": "sven",
+         "resolved_at": _NOW, "robot_acked": True, "station_name": "qc_gate", "has_image": True},
+        {"defect_id": 1, "detected_at": _NOW, "station_pos": 2, "fault": "paint NOK",
+         "resolution": "go", "resolution_note": "false positive", "resolved_by": "sven",
+         "resolved_at": _NOW, "robot_acked": False, "station_name": "inspection", "has_image": False},
+    ]
 
 
 async def _summary():
-    return {"faulty_count": len(SEED),
-            "by_station": {"intake": 1, "packaging": 1, "station 5": 1},
-            "by_severity": {"major": 1, "minor": 2}}
+    return {"faulty_count": 2, "awaiting_resolution": 2, "on_hold": True,
+            "by_station": {"intake": 1, "station 5": 1},
+            "by_severity": {"major": 1, "minor": 1}}
 
 
 db.configured = lambda: True
@@ -74,31 +86,29 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 with TestClient(main.app) as c:
     s = c.get("/api/summary").json()
-    assert s["faulty_count"] == 3, s
+    assert s["faulty_count"] == 2 and s["on_hold"] is True, s
 
     d = c.get("/api/defects").json()
-    assert d["count"] == 3, d
-    first = d["defects"][0]
-    assert {"product_id", "label", "defect", "severity", "station_name"} <= first.keys()
-
+    assert d["count"] == 2 and d["on_hold"] is True, d
     by_id = {x["product_id"]: x for x in d["defects"]}
-    assert by_id[4]["severity"] == "major", by_id[4]      # confidence 0.88
-    assert by_id[5]["severity"] == "minor", by_id[5]      # confidence 0.71
-    assert by_id[6]["severity"] == "minor", by_id[6]      # no confidence
-    assert by_id[6]["station_name"] == "station 5", by_id[6]   # name fallback
-    assert by_id[4]["defect"] == "bad paint", by_id[4]
+    assert by_id[4]["defect"] == "paint NOK", by_id[4]
+    assert all(x["phase"] == "awaiting_resolution" and x["on_hold"] for x in d["defects"]), d
+    assert by_id[4]["severity"] == "major", by_id[4]              # confidence 0.88
+    assert by_id[5]["severity"] == "minor", by_id[5]              # no confidence
+    assert by_id[5]["station_name"] == "station 5", by_id[5]      # name fallback
 
     det = c.get("/api/defects/4").json()
-    assert det["repair"]["est_minutes"] == 5, det["repair"]    # "bad paint" playbook
+    assert "repair" not in det, "mocked repair instructions must be gone"
+    assert det["phase"] == "awaiting_resolution" and det["phase_message"], det
+    assert det["has_capture"] is False and det["capture_url"] is None, det
     here = [x for x in det["line"] if x["is_here"]]
     assert len(here) == 1 and here[0]["position"] == 1, det["line"]
-    assert det["has_capture"] is False and det["capture_url"] is None, det
     assert c.get("/api/defects/999").status_code == 404
 
     ov = c.get("/")
-    assert ov.status_code == 200 and "Live defect feed" in ov.text
+    assert ov.status_code == 200 and 'id="linestatus"' in ov.text and "Live defect feed" in ov.text
 
     op = c.get("/operator?product_id=4")
-    assert op.status_code == 200 and "Repair instructions" in op.text
+    assert op.status_code == 200 and ">Status<" in op.text and "Repair instructions" not in op.text
 
-print("OK — all routes, JSON shapes, line strip, and both templates pass.")
+print("OK — routes, on-hold logic, line strip, and both templates pass; no mocked repair.")

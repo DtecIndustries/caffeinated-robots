@@ -276,7 +276,7 @@ port = os.getenv("ROBOT_PORT", "/dev/ttyUSB0")
 ids  = [int(i) for i in os.getenv("ROBOT_SERVO_IDS", "1 2 3 4 5 6").split()]
 
 from robot.servo_client import ServoClient
-from db.robot_writer import update_robot_state
+from db.robot_writer import update_robot_state, mark_robot_handled
 
 
 def move_to_pose(client: ServoClient, name: str, targets: dict[int, int]):
@@ -325,6 +325,12 @@ try:
         settled_joints = list(client.read_positions().values())
         update_robot_state(curr_pos=station, next_pos=next_station, joints=settled_joints, pose=name)
         _update_robot_display(pose=name, curr_pos=station, next_pos=next_station, joints=settled_joints)
+
+    # The robot has pulled the flagged part off the line — record it so the
+    # no-go defect(s) drop off the dashboard.
+    handled = mark_robot_handled()
+    if handled:
+        print(f"  marked {handled} faulty part(s) as robot-handled")
 
     print("\nRoutine complete.")
 

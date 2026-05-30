@@ -53,11 +53,9 @@ robot_display = {
 DB_DEBOUNCE_S = 1.0
 
 
-def _fault_label(status: str) -> str:
-    """Turn an internal status tag (e.g. 'FAULTY:SURFACE_DAMAGE') into a fault name."""
-    if ":" in status:
-        return status.split(":", 1)[1].replace("_", " ").lower()
-    return "surface damage"
+# The detector can only tell "properly painted (white)" from "not" — so the one
+# defect it raises is a paint NOK.
+FAULT_PAINT_NOK = "paint NOK"
 
 
 def _encode_jpeg_b64(frame) -> str | None:
@@ -93,7 +91,7 @@ async def detection_loop():
                         first_seen[sid] = now
                     present = (now - first_seen[sid]) >= DETECTION_CONFIRM_DELAY
                     confirmed[sid] = present
-                    statuses[sid]  = "FAULTY:SURFACE_DAMAGE" if (present and color == "black") else ""
+                    statuses[sid]  = FAULT_PAINT_NOK if (present and color == "black") else ""
                 else:
                     first_seen[sid] = None
                     confirmed[sid]  = False
@@ -113,22 +111,35 @@ async def detection_loop():
 
             # Snapshot the camera frame the moment a station toggles into a fault
             # (rising edge only — one ticket per defect, not per detection tick).
+            # While the line is on hold (a ticket is awaiting resolution) we do
+            # NOT report new defects, and only ever one defect is open at a time.
             if DB_URL:
-                for sid in STATION_IDS:
-                    is_faulty = bool(statuses.get(sid))
-                    if is_faulty and not prev_faulty[sid]:
+                rising = [sid for sid in STATION_IDS
+                          if bool(statuses.get(sid)) and not prev_faulty[sid]]
+                if rising:
+                    try:
+                        on_hold = await writer.line_on_hold()
+                    except Exception as e:
+                        print(f"  [db] line_on_hold check failed: {e}")
+                        on_hold = True  # fail safe: don't pile on tickets
+                    for sid in rising:
+                        if on_hold:
+                            print(f"  [db] line on hold — skipping new fault at station {sid}")
+                            continue
                         # Capture only the faulty station's ROI — the exact stage
                         # the part was flagged at.
                         image_b64 = _encode_jpeg_b64(crop_roi(frame, sid))
                         try:
                             await writer.record_fault(
                                 station_pos=sid,
-                                fault=_fault_label(statuses[sid]),
+                                fault=FAULT_PAINT_NOK,
                                 image_b64=image_b64,
                             )
+                            on_hold = True  # one open defect at a time
                         except Exception as e:
                             print(f"  [db] record_fault failed: {e}")
-                    prev_faulty[sid] = is_faulty
+                for sid in STATION_IDS:
+                    prev_faulty[sid] = bool(statuses.get(sid))
 
         await asyncio.sleep(DETECTION_INTERVAL)
 

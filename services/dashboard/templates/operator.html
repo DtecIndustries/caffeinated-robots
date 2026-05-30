@@ -48,20 +48,14 @@
   .stn.here .nm { color: var(--major); }
   .stn .pin { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); font-size: 18px; }
   .arrowsm { align-self: center; color: var(--muted); }
-  /* steps */
-  ol.steps { margin: 0; padding-left: 0; list-style: none; counter-reset: step; }
-  ol.steps li { counter-increment: step; padding: 12px 12px 12px 48px; position: relative;
-                border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--panel2);
-                cursor: pointer; transition: opacity .15s; }
-  ol.steps li::before { content: counter(step); position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-                        width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #04222e;
-                        font-weight: 800; font-size: 13px; display: grid; place-items: center; }
-  ol.steps li.done { opacity: .5; text-decoration: line-through; }
-  ol.steps li.done::before { background: var(--ok); }
-  .tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 16px; }
-  .tool { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; font-size: 14px; }
-  .disp { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: #0e1620; border: 1px solid var(--line); }
-  .disp b { color: var(--accent); }
+  /* status / action */
+  .state { display: inline-block; font-size: 12px; font-weight: 800; text-transform: uppercase;
+           letter-spacing: .6px; padding: 6px 12px; border-radius: 8px; }
+  .state.hold { background: #43350f; color: var(--minor); }
+  .state.removing { background: #45131f; color: var(--major); }
+  .action { margin-top: 14px; font-size: 17px; line-height: 1.5; }
+  .substep { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: #0e1620;
+             border: 1px solid var(--line); color: var(--muted); }
   .others { padding: 0 24px 28px; max-width: 1180px; margin: 0 auto; }
   .others h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -84,7 +78,6 @@
 <script>
 const POLL_MS = {{ poll_ms }};
 const FIXED_ID = {{ product_id if product_id is not none else "null" }};
-const doneSteps = new Set();      // step indices marked done by the operator
 let currentId = FIXED_ID;
 
 async function getJSON(url) {
@@ -120,20 +113,24 @@ async function load() {
 
 function renderCleared(list) {
   document.getElementById("banner").hidden = true;
-  const others = list.defects.length
-    ? `<p class="muted">${list.defects.length} other part(s) still need attention.</p>` + chips(list, null)
-    : `<p class="muted">No faulty parts on the line. ✅</p>`;
+  if (!list.defects.length) {
+    document.getElementById("root").innerHTML =
+      `<div class="cleared"><div class="big">✓ Line clear</div>
+       <p class="muted">No defects on the line — line running.</p></div>`;
+    return;
+  }
   document.getElementById("root").innerHTML =
     `<div class="cleared"><div class="big">✓ Part cleared</div>
-     <p class="muted">This part is no longer flagged as faulty.</p>${others}</div>`;
+     <p class="muted">This part is off the line (handled or resolved). ${list.defects.length} other part(s) still on the line.</p>
+     ${chips(list, null)}</div>`;
 }
 
 function chips(list, activeId) {
   if (!list.defects.length) return "";
-  return `<div class="others"><h2>Open defects</h2><div class="chips">` +
+  return `<div class="others"><h2>Defects on the line</h2><div class="chips">` +
     list.defects.map(d =>
       `<a class="chip ${d.product_id === activeId ? "active" : ""}" href="/operator?product_id=${d.product_id}">
-        ${d.label || "#" + d.product_id} · ${(d.severity || d.product_status)}
+        ${d.label} · ${d.phase_label}
        </a>`).join("") +
     `</div></div>`;
 }
@@ -145,10 +142,9 @@ function render(d, list) {
 
   const banner = document.getElementById("banner");
   banner.hidden = false;
-  banner.className = "alarmbanner " + sc;
-  banner.textContent = (sc === "major" ? "⛔ " : "⚠️ ") +
-    "DEFECT — " + (d.label || "Part #" + d.product_id) + " — " + d.defect +
-    "  ·  station: " + (d.station_name || "?");
+  banner.className = "alarmbanner minor";
+  banner.textContent = "⏸ ON HOLD — " +
+    d.label + " — " + d.defect + "  ·  station: " + (d.station_name || "?");
 
   const line = (d.line || []).map((s, i) => {
     const sep = i ? `<div class="arrowsm">→</div>` : "";
@@ -159,25 +155,15 @@ function render(d, list) {
       </div>`;
   }).join("");
 
-  const r = d.repair || {};
-  const steps = (r.steps || []).map((s, i) =>
-    `<li data-i="${i}" class="${doneSteps.has(i) ? "done" : ""}">${s}</li>`).join("");
-  const tools = (r.tools || []).map(t => `<span class="tool">${t}</span>`).join("");
-
   document.getElementById("root").innerHTML = `
     <div class="grid">
       <div class="panel">
         <h2>What is defective</h2>
-        <p class="part-name">${d.label || "Part #" + d.product_id}
-          <span class="sev-badge ${sc}">${d.severity || d.product_status}</span></p>
-        <div class="sku">${d.sku ? "SKU " + d.sku : ""}${d.batch ? " · batch " + d.batch : ""} · product #${d.product_id}</div>
+        <p class="part-name">${d.label}
+          <span class="sev-badge ${sc}">${d.severity}</span></p>
         <div class="defect-line">${d.defect}</div>
-        ${d.reason ? `<div class="reason">${d.reason}</div>` : ""}
         <div class="kv">
-          <span class="k">Status</span><span>${d.product_status}</span>
-          <span class="k">Detection</span><span>${d.has_failed_detection
-              ? "failed QC" + (d.confidence != null ? " · conf " + (d.confidence*100).toFixed(0) + "%" : "")
-              : "flagged by status"}</span>
+          <span class="k">Detected</span><span>QC inspection${d.confidence != null ? " · conf " + (d.confidence*100).toFixed(0) + "%" : ""}</span>
           <span class="k">Flagged at</span><span>${fmtTime(d.detected_at)}</span>
         </div>
         ${d.has_capture ? `
@@ -191,26 +177,16 @@ function render(d, list) {
       </div>
 
       <div class="panel">
-        <h2>Repair instructions</h2>
-        <div class="reason" style="margin-bottom:12px">${r.summary || ""}</div>
-        ${tools ? `<div class="tools">${tools}</div>` : ""}
-        <ol class="steps">${steps}</ol>
-        <div class="disp">
-          <div><b>Disposition:</b> ${r.disposition || "Manual review"}</div>
-          ${r.est_minutes ? `<div class="muted">Est. time: ~${r.est_minutes} min · tap a step to check it off</div>` : ""}
-        </div>
+        <h2>Status</h2>
+        <span class="state hold">${d.phase_label}</span>
+        <div class="action">${d.phase_message}</div>
+        <div class="substep">The supervisor reviews this fault in Discord. On GO the part
+          continues; on NO-GO the robot pulls it off the line and the line is cleared. Either
+          decision frees the line — this view clears automatically when that happens.</div>
       </div>
     </div>
     ${chips(list, d.product_id)}
   `;
-
-  document.querySelectorAll("ol.steps li").forEach(li => {
-    li.addEventListener("click", () => {
-      const i = +li.dataset.i;
-      if (doneSteps.has(i)) { doneSteps.delete(i); li.classList.remove("done"); }
-      else { doneSteps.add(i); li.classList.add("done"); }
-    });
-  });
 }
 
 load();

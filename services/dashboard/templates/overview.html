@@ -49,6 +49,26 @@
   .defect .meta { color: var(--muted); font-size: 12.5px; display: flex; gap: 14px; flex-wrap: wrap; }
   .defect .arrow { color: var(--accent); font-size: 12px; margin-top: 10px; }
   .empty { text-align: center; color: var(--muted); padding: 60px 0; }
+  .history { margin-top: 30px; }
+  .histbtn { background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+             border-radius: 10px; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .histbtn:hover { border-color: var(--accent); }
+  .histbody { margin-top: 12px; display: grid; gap: 8px; }
+  .hitem { display: flex; align-items: center; gap: 14px; background: var(--panel);
+           border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font-size: 13.5px; }
+  .hitem img { width: 46px; height: 46px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+  .hitem .hmeta { color: var(--muted); margin-top: 2px; }
+  .hitem .out { font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+                padding: 4px 9px; border-radius: 6px; white-space: nowrap; }
+  .hitem .out.go { background: #0e2018; color: var(--ok); }
+  .hitem .out.nogo { background: #2a0c14; color: var(--major); }
+  .hempty { color: var(--muted); font-size: 13px; padding: 8px 2px; }
+  .linestatus { font-size: 22px; font-weight: 800; letter-spacing: .5px; padding: 14px 20px;
+                border-radius: 12px; margin-bottom: 18px; border: 1px solid var(--line); }
+  .linestatus.running { background: #0e2018; color: var(--ok); border-color: #1d3a2b; }
+  .linestatus.hold { background: #2a200a; color: var(--minor); border-color: #4a3914;
+                     animation: pulse 1.4s ease-in-out infinite; }
+  .linestatus.removing { background: #2a0c14; color: var(--major); border-color: #4a1422; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
   @keyframes flash { 0% { background: #2a1622; } 100% { background: var(--panel); } }
 </style>
@@ -63,9 +83,10 @@
   </header>
 
   <div class="wrap">
+    <div class="linestatus running" id="linestatus">✓ LINE RUNNING</div>
     <div class="stats">
       <div class="card">
-        <div class="label">Faulty parts on the line</div>
+        <div class="label">Defects on the line</div>
         <div class="big clear" id="count">0</div>
       </div>
       <div class="card">
@@ -81,12 +102,19 @@
     <h2>Live defect feed</h2>
     <div class="feed" id="feed"></div>
     <div class="empty" id="empty" hidden>No faulty parts — line is clear. ✅</div>
+
+    <div class="history">
+      <button id="histToggle" class="histbtn" aria-expanded="false">▸ Defect history</button>
+      <div id="histbody" class="histbody" hidden></div>
+    </div>
   </div>
 
 <script>
 const POLL_MS = {{ poll_ms }};
 const seen = new Set();
 let first = true;
+let histOpen = false;
+let lastHist = null;
 
 function fmtTime(iso) {
   if (!iso) return "—";
@@ -98,13 +126,39 @@ async function tick() {
   try {
     const r = await fetch("/api/defects");
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
-    const data = await r.json();
-    render(data);
+    render(await r.json());
+    const h = await fetch("/api/history");
+    if (h.ok) { lastHist = await h.json(); renderHistory(); }
     setStatus(true, "live · " + new Date().toLocaleTimeString());
   } catch (e) {
     setStatus(false, "error: " + e.message);
   }
 }
+
+function renderHistory() {
+  if (!lastHist) return;
+  const btn = document.getElementById("histToggle");
+  btn.textContent = (histOpen ? "▾" : "▸") + " Defect history (" + lastHist.count + ")";
+  btn.setAttribute("aria-expanded", histOpen);
+  const body = document.getElementById("histbody");
+  body.hidden = !histOpen;
+  body.innerHTML = lastHist.history.length
+    ? lastHist.history.map(h => `
+        <div class="hitem">
+          ${h.has_capture ? `<img src="${h.capture_url}" alt="capture" />` : ""}
+          <div style="flex:1">
+            <div><b>#${h.product_id} ${h.defect}</b> · 📍 ${h.station_name} (pos ${h.station_position ?? "?"})</div>
+            <div class="hmeta">resolved ${fmtTime(h.resolved_at)}${h.resolved_by ? " · by " + h.resolved_by : ""}${h.resolution_note ? " · " + h.resolution_note : ""}</div>
+          </div>
+          <span class="out ${h.resolution === "go" ? "go" : "nogo"}">${h.outcome}</span>
+        </div>`).join("")
+    : `<div class="hempty">No resolved defects yet.</div>`;
+}
+
+document.getElementById("histToggle").addEventListener("click", () => {
+  histOpen = !histOpen;
+  renderHistory();
+});
 
 function setStatus(ok, msg) {
   document.getElementById("status").textContent = msg;
@@ -118,18 +172,24 @@ function render(data) {
   el.textContent = count;
   el.className = "big " + (count > 0 ? "alarm" : "clear");
 
+  // Binary line state: on hold while any ticket is unresolved, else available.
+  const ls = document.getElementById("linestatus");
+  if (data.on_hold) {
+    ls.className = "linestatus hold"; ls.textContent = "⏸ LINE ON HOLD — awaiting supervisor decision";
+  } else {
+    ls.className = "linestatus running"; ls.textContent = "✓ LINE AVAILABLE — no defects";
+  }
+
   // severity + station rollups
-  const sev = { major: 0, minor: 0, other: 0 }, st = {};
+  const sev = { major: 0, minor: 0 }, st = {};
   for (const d of data.defects) {
-    const s = (d.severity || "other").toLowerCase();
-    sev[s === "major" || s === "minor" ? s : "other"]++;
+    sev[d.severity === "major" ? "major" : "minor"]++;
     const name = d.station_name || "unknown";
     st[name] = (st[name] || 0) + 1;
   }
   document.getElementById("sev").innerHTML =
     `<span class="pill major">major <b>${sev.major}</b></span>` +
-    `<span class="pill minor">minor <b>${sev.minor}</b></span>` +
-    `<span class="pill">other <b>${sev.other}</b></span>`;
+    `<span class="pill minor">minor <b>${sev.minor}</b></span>`;
   document.getElementById("stations").innerHTML =
     Object.keys(st).length
       ? Object.entries(st).map(([n, c]) => `<span class="pill">${n} <b>${c}</b></span>`).join("")
@@ -139,24 +199,23 @@ function render(data) {
   document.getElementById("empty").hidden = count > 0;
   feed.innerHTML = "";
   for (const d of data.defects) {
-    const sevClass = (d.severity || "").toLowerCase() === "major" ? "major" : "minor";
+    const cls = d.severity === "major" ? "major" : "minor";
     const isNew = !first && !seen.has(d.product_id);
     seen.add(d.product_id);
     const a = document.createElement("a");
     a.href = "/operator?product_id=" + d.product_id;
-    a.className = "defect " + sevClass + (isNew ? " isnew" : "");
+    a.className = "defect " + cls + (isNew ? " isnew" : "");
     a.innerHTML =
       `<div class="top">
-         <span class="part">${d.label || "Part #" + d.product_id}</span>
-         <span class="sev ${sevClass}">${d.severity || d.product_status}</span>
+         <span class="part">${d.label}</span>
+         <span class="sev ${cls}">${d.phase_label}</span>
        </div>
        <div class="what">${d.defect}</div>
        <div class="meta">
          <span>📍 ${d.station_name || "?"} (pos ${d.station_position ?? "?"})</span>
-         <span>status: ${d.product_status}</span>
          <span>🕗 ${fmtTime(d.detected_at)}</span>
        </div>
-       <div class="arrow">Open repair instructions →</div>`;
+       <div class="arrow">Open details →</div>`;
     feed.appendChild(a);
   }
   first = false;

@@ -78,7 +78,19 @@ class StationWriter:
             await cur.execute(
                 "ALTER TABLE faulty_parts ADD COLUMN IF NOT EXISTS image_b64 TEXT"
             )
+            # robot_acked_at records when the robot handled (pulled) the part.
+            await cur.execute(
+                "ALTER TABLE faulty_parts ADD COLUMN IF NOT EXISTS robot_acked_at TIMESTAMPTZ"
+            )
         await self._conn.commit()
+
+    async def line_on_hold(self) -> bool:
+        """True when the line is on hold — i.e. the most recent ticket is still
+        unresolved. No new defect should be reported while this holds."""
+        async with self._conn.cursor() as cur:
+            await cur.execute("SELECT resolution FROM faulty_parts ORDER BY id DESC LIMIT 1")
+            row = await cur.fetchone()
+        return row is not None and row[0] is None
 
     async def record_fault(
         self,
