@@ -1,0 +1,26 @@
+# env
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.uv/
+
+# JS
+node_modules/
+dist/
+.vite/
+
+# CV model weights
+services/vision/detection/models/*
+!services/vision/detection/models/.gitkeep
+
+# Reports (Notion integration — optional)
+reports/
+
+# OS
+.DS_Store
