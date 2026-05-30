@@ -10,7 +10,8 @@ from config import (
     CAMERA_INDEX, CAMERA_URL,
     STREAM_HOST, STREAM_PORT,
     STREAM_WIDTH, STREAM_HEIGHT,
-    DETECTION_INTERVAL, DETECTION_THRESHOLD,
+    DETECTION_INTERVAL, DETECTION_RATIO_THRESHOLD,
+    DETECTION_BRIGHT_THRESH, DETECTION_DARK_THRESH,
     DB_URL,
 )
 from camera.capture import Camera
@@ -19,7 +20,11 @@ from detection.detector import BoxDetector
 from db.sodastraw_client import StationWriter
 
 cam = Camera(CAMERA_URL if CAMERA_URL else CAMERA_INDEX)
-detector = BoxDetector(threshold=DETECTION_THRESHOLD)
+detector = BoxDetector(
+    ratio_threshold=DETECTION_RATIO_THRESHOLD,
+    bright_thresh=DETECTION_BRIGHT_THRESH,
+    dark_thresh=DETECTION_DARK_THRESH,
+)
 writer = StationWriter()
 
 # Shared state — last known station booleans

@@ -4,28 +4,39 @@ from detection.station import STATIONS
 
 
 class BoxDetector:
-    def __init__(self, threshold: float):
-        # MOG2 learns the static background (conveyor belt) over ~200 frames,
-        # then flags anything that appears on top as foreground.
-        self._bg = cv2.createBackgroundSubtractorMOG2(history=200, varThreshold=40)
-        self._threshold = threshold
+    def __init__(self, ratio_threshold: float, bright_thresh: int, dark_thresh: int):
+        self._ratio_threshold = ratio_threshold
+        self._bright_thresh = bright_thresh
+        self._dark_thresh = dark_thresh
+        # Morphological kernel to remove small noise specks
+        self._kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+
+    def _object_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+        # White objects: well above the dark grey table
+        _, bright = cv2.threshold(blurred, self._bright_thresh, 255, cv2.THRESH_BINARY)
+        # Black objects: below the dark grey table
+        _, dark = cv2.threshold(blurred, self._dark_thresh, 255, cv2.THRESH_BINARY_INV)
+        mask = cv2.bitwise_or(bright, dark)
+        # Remove isolated noise pixels while keeping solid objects
+        return cv2.morphologyEx(mask, cv2.MORPH_OPEN, self._kernel)
 
     def detect(self, frame: np.ndarray) -> dict[int, bool]:
         h, w = frame.shape[:2]
-        fg_mask = self._bg.apply(frame)
+        mask = self._object_mask(frame)
 
         results: dict[int, bool] = {}
         for s in STATIONS:
             x1, y1 = int(s.x1 * w), int(s.y1 * h)
             x2, y2 = int(s.x2 * w), int(s.y2 * h)
-            roi = fg_mask[y1:y2, x1:x2]
+            roi = mask[y1:y2, x1:x2]
             ratio = np.count_nonzero(roi) / roi.size
-            results[s.id] = ratio > self._threshold
+            results[s.id] = ratio > self._ratio_threshold
 
         return results
 
     def annotated(self, frame: np.ndarray, states: dict[int, bool]) -> np.ndarray:
-        """Return a copy of the frame with ROIs and states drawn on it (useful for debug stream)."""
         out = frame.copy()
         h, w = out.shape[:2]
         for s in STATIONS:
