@@ -15,5 +15,5 @@ DB_URL = os.getenv("DB_URL", "")  # postgresql://user:pass@host/db
 DETECTION_INTERVAL = float(os.getenv("DETECTION_INTERVAL", 0.5))
 DETECTION_CONFIRM_DELAY = float(os.getenv("DETECTION_CONFIRM_DELAY", 1.0))  # seconds object must be continuously detected before confirming
 DETECTION_RATIO_THRESHOLD = float(os.getenv("DETECTION_RATIO_THRESHOLD", 0.02))  # min fraction of ROI pixels that must be object
-DETECTION_BRIGHT_THRESH = int(os.getenv("DETECTION_BRIGHT_THRESH", 180))  # grayscale value above which = white object
-DETECTION_DARK_THRESH = int(os.getenv("DETECTION_DARK_THRESH", 50))   # grayscale value below which = black object
+DETECTION_BRIGHT_THRESH = int(os.getenv("DETECTION_BRIGHT_THRESH", 200))  # pixels above this = white/GOOD
+DETECTION_RANGE_THRESH  = int(os.getenv("DETECTION_RANGE_THRESH",  40))   # min/max grey difference above this = object present but not white → FAULTY
