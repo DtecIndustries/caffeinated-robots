@@ -110,6 +110,27 @@ ACTIONS = {
             "forces":    {3: True, 4: True},
         },
         {
+            "name":      "above|part_true|gripper_closed",
+            "positions": [2052, 1539, 2282, 3104, 2069, 2060],
+            "pause":     1.0,
+            "station":   4,
+            "forces":    {3: True, 4: True},
+        },
+        {
+            "name":      "lower|part_true|gripper_closed",
+            "positions": [2052, 1853, 2443, 2853, 2069, 2060],
+            "pause":     1.0,
+            "station":   4,
+            "forces":    {3: True, 4: True},
+        },
+        {
+            "name":      "lower|part_false|gripper_open",
+            "positions": [2052, 1853, 2443, 2853, 2069, 2603],
+            "pause":     1.0,
+            "station":   4,
+            "forces":    {3: True, 4: True},
+        },
+        {
             "name":      "home|part_true|gripper_closed",
             "positions": [2052, 973, 2306, 2970, 2068, 2060],
             "pause":     4.0,
