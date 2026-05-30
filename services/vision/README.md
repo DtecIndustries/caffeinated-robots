@@ -11,16 +11,15 @@ Python service that handles camera capture, computer vision, and data persistenc
 
 ## Stack
 
-- Python
+- Python + uv
 - OpenCV — object/state detection
 - LeRobot — robot state reader
-- Flask or FastAPI — MJPEG stream server
+- FastAPI + uvicorn — MJPEG stream server
 - Soda Straw — online DB sync
 
 ## Running
 
 ```bash
-pip install -r requirements.txt
-cp ../../.env.example .env
-python main.py
+cp .env.example .env
+uv run main.py
 ```
