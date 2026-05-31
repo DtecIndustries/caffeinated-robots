@@ -1,10 +1,11 @@
 # Caffeinated Robots
 
-Hackers & Ravers submission — bringing the factory floor into the agentic stack.  
+**Hackers & Ravers submission🥈** — bridging the gap between the factory floor and the agentic stack.  
+*Built on a Saturday with an inadvisable amount of coffee. Hence the name.*
 
-A physical assembly line mockup, monitored through computer vision, feeding part presence, defect state and robot state live into a 3D digital twin. The SO101 robot arm closes the loop: agents don't just observe, they can act in the physical world.  
+A physical assembly line mockup, monitored through computer vision, feeding part presence, defect state and robot state live into a 3D digital twin. The SO101 robot arm closes the loop: the agents don't just observe, they can act in the physical world.  
 
-Soda Straw is built to unify data sources and software tools under a single MCP layer. We wanted to push it one step further and also connected it to the physical world. Query what's actually happening on the factory floor. Approve or reject flagged parts. Trigger the production line to physically move parts straight from Claude, Cursor or your AI agent of choice.
+Soda Straw is a tool to unify data sources and software tools under a single MCP layer. We wanted to push it one step further and also connected it to the physical world. Query what's actually happening on the factory floor. Approve or reject flagged parts. Trigger the production line to physically move parts, straight from Claude, Cursor or your AI agent of choice.  
 
 ## Running
 
