@@ -1,22 +1,22 @@
 # Caffeinated Robots
 
-Hackers & Ravers submission — a real-time QC system for a robot assembly line. A computer vision service reads the camera, detects part presence and defects per station, and drives a Feetech servo arm. A 3D digital twin reads the database and visualises the production line live.
-
-Built on Soda Straw — proving it doesn't just connect digital products, but bridges all the way into the physical world.
+Hackers & Ravers submission — bringing the factory floor into the agentic stack.
+A physical assembly line mockup, monitored through computer vision, feeding part presence, defect state, and robot state live into a 3D digital twin. The SO101 robot arm closes the loop; agents don't just observe, they can act in the physical world.
+Soda Straw is built to unify data sources and software tools under a single MCP layer. We pushed it one step further and also connected it to the physical world. Query what's actually happening on the factory floor. Approve or reject flagged parts. Trigger the production line to physically move parts, straight from Claude, Cursor or your AI agent of choice.
 
 ## Running
 
 **vision + detection + DB sync**
 ```bash
 cd services/vision
-cp .env.example .env   # fill in ROBOT_PORT, DB_URL
+cp .env.example .env
 uv run main.py
 ```
 
 **autonomous robot runner**
 ```bash
 cd services/vision
-uv run runner.py           # polls DB, dispatches 3_5 / 5_4 / 5_R automatically
+uv run runner.py
 ```
 
 **digital twin**
@@ -91,7 +91,7 @@ Local SQLite (`local.db`) mirrors the same structure and syncs upstream on chang
         ├── src/
         │   ├── main.js
         │   ├── config.js
-        │   ├── scene/                   # Three.js scene — crane, conveyor, boxes
+        │   ├── scene/                   # Three.js scene
         │   ├── data/                    # StateSync, mock data, robot state
         │   └── ui/                      # StatusPanel, DebugPanel
         │
