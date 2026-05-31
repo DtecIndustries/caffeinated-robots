@@ -84,18 +84,34 @@ Local SQLite (`local.db`) mirrors the same structure and syncs upstream on chang
     │       ├── move_to.py               # Move all servos to a pose
     │       └── torque_off.py            # Emergency motor release
     │
-    └── twin/                            # JS — Three.js digital twin
-        ├── index.html
-        ├── package.json
-        │
-        ├── src/
-        │   ├── main.js
-        │   ├── config.js
-        │   ├── scene/                   # Three.js scene
-        │   ├── data/                    # StateSync, mock data, robot state
-        │   └── ui/                      # StatusPanel, DebugPanel
-        │
-        └── server/                      # Vite middleware — DB proxy
-            ├── fetch-state.mjs
-            └── map-state.mjs
+    ├── twin/                            # JS — Three.js digital twin
+    │   ├── index.html
+    │   ├── package.json
+    │   │
+    │   ├── src/
+    │   │   ├── main.js
+    │   │   ├── config.js
+    │   │   ├── scene/                   # Three.js scene
+    │   │   ├── data/                    # StateSync, mock data, robot state
+    │   │   └── ui/                      # StatusPanel, DebugPanel
+    │   │
+    │   └── server/                      # Vite middleware — DB proxy
+    │       ├── fetch-state.mjs
+    │       └── map-state.mjs
+    │
+    ├── dashboard/                       # Python — QC web dashboards (operator + overview)
+    │   ├── main.py
+    │   ├── config.py
+    │   ├── db.py
+    │   └── templates/
+    │       ├── operator.html
+    │       └── overview.html
+    │
+    └── supervisor/                      # Python — Claude supervisor agent via Soda Straw
+        ├── run.py
+        ├── supervisor_agent.py          # Claude agent — reviews flagged parts, sets resolution
+        ├── monitor.py                   # Polls faulty_parts, triggers agent
+        ├── sodastraw.py                 # Soda Straw straw client
+        └── tools/
+            └── make_test_ticket.py
 ```
