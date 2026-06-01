@@ -10,4 +10,7 @@ dependencies = [
     "psycopg[binary]",
     "numpy",
     "pyserial",
+    "ultralytics>=8.3.0",
+    "openai>=1.40",
+    "numpy",
 ]

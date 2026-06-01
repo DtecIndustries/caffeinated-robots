@@ -2,8 +2,11 @@ import asyncio
 import base64
 import time
 import cv2
-import uvicorn
+import time
 from contextlib import asynccontextmanager
+
+import cv2
+import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -146,18 +149,47 @@ async def detection_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global pipeline
     cam.start()
     local_db.ensure_tables()
     if DB_URL:
         await writer.connect()
     asyncio.create_task(detection_loop())
     asyncio.create_task(sync_loop())
+
+    segmenter = YoloSegmenter(
+        model_path=config.YOLO_MODEL,
+        device=config.YOLO_DEVICE,
+        imgsz=config.YOLO_IMGSZ,
+        conf=config.YOLO_CONF,
+        half=config.YOLO_HALF,
+    )
+    vlm = VLMClient(
+        base_url=config.VLLM_BASE_URL,
+        model=config.VLLM_MODEL,
+        api_key=config.VLLM_API_KEY,
+        max_tokens=config.VLM_MAX_TOKENS,
+        temperature=config.VLM_TEMPERATURE,
+        jpeg_max_side=config.VLM_JPEG_MAX_SIDE,
+        jpeg_quality=config.VLM_JPEG_QUALITY,
+    )
+    pipeline = InferencePipeline(
+        camera=cam,
+        segmenter=segmenter,
+        vlm=vlm,
+        yolo_every_n=config.YOLO_EVERY_N,
+        vlm_min_interval_s=config.VLM_MIN_INTERVAL_S,
+        vlm_heartbeat_s=config.VLM_HEARTBEAT_S,
+        enable_vlm=config.ENABLE_VLM,
+    )
+    pipeline.start()
     yield
+    pipeline.stop()
     cam.stop()
     await writer.close()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(title="Vision Inference Pipeline", lifespan=lifespan)
 set_camera(cam)
 app.include_router(stream_router)
 
@@ -288,5 +320,57 @@ def debug_stream():
     )
 
 
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "pipeline": pipeline.status() if pipeline else None,
+        "vlm_reachable": pipeline.vlm.healthy() if pipeline else False,
+    }
+
+
+@app.get("/detections")
+def detections():
+    """Latest YOLO segmentation metadata for the current frame."""
+    if pipeline is None:
+        return JSONResponse({"error": "pipeline not ready"}, status_code=503)
+    meta = pipeline.latest_metadata()
+    return meta.to_dict() if meta else JSONResponse({}, status_code=204)
+
+
+@app.get("/scene")
+def scene():
+    """Latest VLM interpretation of the scene (YOLO-gated)."""
+    if pipeline is None:
+        return JSONResponse({"error": "pipeline not ready"}, status_code=503)
+    s = pipeline.latest_scene()
+    return s.to_dict() if s else JSONResponse({}, status_code=204)
+
+
+def _annotated_frames():
+    while True:
+        frame = pipeline.latest_annotated() if pipeline else None
+        if frame is None:
+            time.sleep(0.03)
+            continue
+        ok, buf = cv2.imencode(".jpg", frame)
+        if not ok:
+            continue
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+        )
+        time.sleep(1.0 / max(1, config.STREAM_FPS))
+
+
+@app.get("/annotated")
+def annotated_stream():
+    """MJPEG stream with YOLO boxes/labels drawn on each frame."""
+    return StreamingResponse(
+        _annotated_frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=STREAM_HOST, port=STREAM_PORT, reload=False)
+    uvicorn.run("main:app", host=config.STREAM_HOST, port=config.STREAM_PORT, reload=False)
